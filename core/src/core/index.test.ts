@@ -24,10 +24,15 @@ describe('Node', () => {
   });
 
   it('creates with components', () => {
-    const node = createNode('/tasks/1', 'task', {}, {
-      info: { $type: 'task', status: 'open' },
-      budget: { $type: 'money', amount: 100, currency: 'USD' },
-    });
+    const node = createNode(
+      '/tasks/1',
+      'task',
+      {},
+      {
+        info: { $type: 'task', status: 'open' },
+        budget: { $type: 'money', amount: 100, currency: 'USD' },
+      },
+    );
     assert.equal(node['#info'].$type, 'task');
     assert.equal(node['#budget'].amount, 100);
   });
@@ -38,10 +43,15 @@ describe('Node', () => {
 });
 
 describe('Component access', () => {
-  const node = createNode('/tasks/1', 'task', {}, {
-    budget: { $type: 'money', amount: 100, currency: 'USD' },
-    estimate: { $type: 'money', amount: 200, currency: 'USD' },
-  });
+  const node = createNode(
+    '/tasks/1',
+    'task',
+    {},
+    {
+      budget: { $type: 'money', amount: 100, currency: 'USD' },
+      estimate: { $type: 'money', amount: 200, currency: 'USD' },
+    },
+  );
 
   it('get by type — node-level match', () => {
     // node.$type is 't.task', getComponent('task') normalizes and matches
@@ -84,38 +94,65 @@ describe('Component access', () => {
   });
 
   it('iterates the main component first, then ($order, name), whatever the key order', () => {
-    const n = createNode('/x', 'x', {}, {
-      c: { $type: 'money', $order: 'a' },
-      b: { $type: 'tag', $order: 'V' },
-      a: { $type: 'money', $order: 'a' },
-      d: { $type: 'tag', $order: 'U' },
-    });
+    const n = createNode(
+      '/x',
+      'x',
+      {},
+      {
+        c: { $type: 'money', $order: 'a' },
+        b: { $type: 'tag', $order: 'V' },
+        a: { $type: 'money', $order: 'a' },
+        d: { $type: 'tag', $order: 'U' },
+      },
+    );
 
-    assert.deepEqual(getComponents(n).map(([name]) => name), ['', '#d', '#b', '#a', '#c']);
-    assert.deepEqual(getComponents(n, 'money').map(([name]) => name), ['#a', '#c']);
+    assert.deepEqual(
+      getComponents(n).map(([name]) => name),
+      ['', '#d', '#b', '#a', '#c'],
+    );
+    assert.deepEqual(
+      getComponents(n, 'money').map(([name]) => name),
+      ['#a', '#c'],
+    );
   });
 
   it('components without $order come before ordered ones, by name', () => {
-    const n = createNode('/x', 'x', {}, {
-      ordered: { $type: 'tag', $order: '1' },
-      zeta: { $type: 'tag' },
-      alpha: { $type: 'tag' },
-    });
+    const n = createNode(
+      '/x',
+      'x',
+      {},
+      {
+        ordered: { $type: 'tag', $order: '1' },
+        zeta: { $type: 'tag' },
+        alpha: { $type: 'tag' },
+      },
+    );
     n.$order = 'z';
 
-    assert.deepEqual(getComponents(n).map(([name]) => name), ['', '#alpha', '#zeta', '#ordered']);
+    assert.deepEqual(
+      getComponents(n).map(([name]) => name),
+      ['', '#alpha', '#zeta', '#ordered'],
+    );
   });
 
   it('getComponent by type is the first of getComponents, whatever the key order', () => {
     const comps: Record<string, { $type: string; $order?: string }> = {
-      m1: { $type: 'money', $order: 'b' }, m2: { $type: 'money', $order: 'a' }, m3: { $type: 'money', $order: 'a' },
-      m4: { $type: 'money' }, t1: { $type: 'tag' },
+      m1: { $type: 'money', $order: 'b' },
+      m2: { $type: 'money', $order: 'a' },
+      m3: { $type: 'money', $order: 'a' },
+      m4: { $type: 'money' },
+      t1: { $type: 'tag' },
     };
     const names = Object.keys(comps);
 
     for (let shift = 0; shift < names.length; shift++) {
       const rotated = [...names.slice(shift), ...names.slice(0, shift)];
-      const n = createNode('/x', 'x', {}, Object.fromEntries(rotated.map((name) => [name, comps[name]])));
+      const n = createNode(
+        '/x',
+        'x',
+        {},
+        Object.fromEntries(rotated.map((name) => [name, comps[name]])),
+      );
 
       assert.equal(getComponent(n, 'money'), getComponents(n, 'money')[0][1], rotated.join());
       assert.equal(getComponent(n, 'money'), comps.m4, rotated.join());
@@ -198,8 +235,6 @@ describe('Path utils', () => {
   });
 });
 
-
-
 describe('assertSafePath (F03)', () => {
   it('accepts valid paths', () => {
     assertSafePath('/');
@@ -247,8 +282,6 @@ describe('assertSafePath (F03)', () => {
     assert.throws(() => assertSafePath('/data/x#secret'), /reserved/);
   });
 });
-
-
 
 // F7: prototype-pollution defense — assertSafeKey/isSafeKey/safeJsonParse + createNode
 describe('isSafeKey / assertSafeKey', () => {

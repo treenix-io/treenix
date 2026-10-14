@@ -32,7 +32,7 @@ declare module '#core/context' {
 const stringText = declareText('string', (data) => String(data.value ?? ''));
 const numberText = declareText('number', (data) => String(data.value ?? 0));
 // kriz: true / false, why yes/no?
-const booleanText = declareText('boolean', (data) => data.value ? 'yes' : 'no');
+const booleanText = declareText('boolean', (data) => (data.value ? 'yes' : 'no'));
 const entries = [stringText, numberText, booleanText];
 
 export const clientModules = [declareOpenModule('@treenx/core/contexts/text', entries)];

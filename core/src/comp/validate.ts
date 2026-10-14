@@ -23,9 +23,11 @@ const SCHEMA_DEPTH_MAX = 16;
 const NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)[+*]/;
 
 function assertSafePattern(pattern: string, ctx: string): void {
-  if (pattern.length > SCHEMA_PATTERN_MAX) throw new KernelError('INVALID', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
+  if (pattern.length > SCHEMA_PATTERN_MAX)
+    throw new KernelError('INVALID', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
   // The classic catastrophic-backtracking shape: nested quantifiers like (a+)+ / (a*)*.
-  if (NESTED_QUANTIFIER.test(pattern)) throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
+  if (NESTED_QUANTIFIER.test(pattern))
+    throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
 }
 
 const BRANCHES = ['anyOf', 'oneOf', 'allOf'] as const;
@@ -38,20 +40,27 @@ const malformed = (ctx: string, what: string) => new KernelError('INVALID', `${c
  * the validator reads has the shape it expects, and every pattern is safe. Its `methods` carry the schemas of
  * the actions' arguments, yields and returns.
  */
-export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): asserts schema is PropertySchema {
+export function assertSafeSchema(
+  schema: unknown,
+  ctx: string,
+  depth = 0,
+): asserts schema is PropertySchema {
   if (depth > SCHEMA_DEPTH_MAX) throw malformed(ctx, `schema too deep (max ${SCHEMA_DEPTH_MAX})`);
   if (!isRecord(schema)) throw malformed(ctx, 'a schema must be an object');
   const sub = (s: unknown) => assertSafeSchema(s, ctx, depth + 1);
 
-  if (schema.type !== undefined && typeof schema.type !== 'string') throw malformed(ctx, 'type must be a string');
+  if (schema.type !== undefined && typeof schema.type !== 'string')
+    throw malformed(ctx, 'type must be a string');
   if (schema.pattern !== undefined) {
     if (typeof schema.pattern !== 'string') throw malformed(ctx, 'pattern must be a string');
     compiledPattern(schema.pattern, ctx);
   }
   for (const key of BOUNDS)
-    if (schema[key] !== undefined && typeof schema[key] !== 'number') throw malformed(ctx, `${key} must be a number`);
+    if (schema[key] !== undefined && typeof schema[key] !== 'number')
+      throw malformed(ctx, `${key} must be a number`);
 
-  if (schema.enum !== undefined && !Array.isArray(schema.enum)) throw malformed(ctx, 'enum must be an array');
+  if (schema.enum !== undefined && !Array.isArray(schema.enum))
+    throw malformed(ctx, 'enum must be an array');
   const required = schema.required ?? [];
   if (!Array.isArray(required) || !required.every((key) => typeof key === 'string'))
     throw malformed(ctx, 'required must be an array of strings');
@@ -67,7 +76,8 @@ export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): asser
   Object.values(properties).forEach(sub);
 
   if (schema.items !== undefined) sub(schema.items);
-  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') sub(schema.additionalProperties);
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean')
+    sub(schema.additionalProperties);
   if (schema.methods !== undefined) assertSafeMethods(schema.methods, ctx, depth + 1);
 }
 
@@ -77,10 +87,12 @@ function assertSafeMethods(methods: unknown, ctx: string, depth: number): void {
   for (const [name, method] of Object.entries(methods)) {
     if (!isRecord(method)) throw malformed(ctx, `method ${name} must be an object`);
     const args = method.arguments ?? [];
-    if (!Array.isArray(args)) throw malformed(ctx, `method ${name}: arguments must be an array of schemas`);
+    if (!Array.isArray(args))
+      throw malformed(ctx, `method ${name}: arguments must be an array of schemas`);
 
     for (const arg of args) assertSafeSchema(arg, ctx, depth);
-    for (const key of ['yields', 'return']) if (method[key] !== undefined) assertSafeSchema(method[key], ctx, depth);
+    for (const key of ['yields', 'return'])
+      if (method[key] !== undefined) assertSafeSchema(method[key], ctx, depth);
   }
 }
 
@@ -106,10 +118,18 @@ function compiledPattern(pattern: string, path: string): RegExp {
 
 // ── Type-dispatched validator tree ──
 
-export type TypeValidator = (value: unknown, def: PropertySchema, path: string, errors: ValidationError[]) => void;
+export type TypeValidator = (
+  value: unknown,
+  def: PropertySchema,
+  path: string,
+  errors: ValidationError[],
+) => void;
 
 const validateNumber: TypeValidator = (value, def, path, errors) => {
-  if (typeof value !== 'number') { errors.push({ path, message: `expected number, got ${typeof value}` }); return; }
+  if (typeof value !== 'number') {
+    errors.push({ path, message: `expected number, got ${typeof value}` });
+    return;
+  }
   if (typeof def.minimum === 'number' && value < def.minimum)
     errors.push({ path, message: `minimum ${def.minimum}, got ${value}` });
   if (typeof def.maximum === 'number' && value > def.maximum)
@@ -118,7 +138,10 @@ const validateNumber: TypeValidator = (value, def, path, errors) => {
 
 const builtinValidators: Record<string, TypeValidator> = {
   string(value, def, path, errors) {
-    if (typeof value !== 'string') { errors.push({ path, message: `expected string, got ${typeof value}` }); return; }
+    if (typeof value !== 'string') {
+      errors.push({ path, message: `expected string, got ${typeof value}` });
+      return;
+    }
     if (typeof def.minLength === 'number' && value.length < def.minLength)
       errors.push({ path, message: `min length ${def.minLength}, got ${value.length}` });
     if (typeof def.maxLength === 'number' && value.length > def.maxLength)
@@ -131,11 +154,13 @@ const builtinValidators: Record<string, TypeValidator> = {
 
   integer(value, def, path, errors) {
     validateNumber(value, def, path, errors);
-    if (typeof value === 'number' && !Number.isInteger(value)) errors.push({ path, message: `expected integer, got ${value}` });
+    if (typeof value === 'number' && !Number.isInteger(value))
+      errors.push({ path, message: `expected integer, got ${value}` });
   },
 
   boolean(value, _def, path, errors) {
-    if (typeof value !== 'boolean') errors.push({ path, message: `expected boolean, got ${typeof value}` });
+    if (typeof value !== 'boolean')
+      errors.push({ path, message: `expected boolean, got ${typeof value}` });
   },
 
   null(value, _def, path, errors) {
@@ -143,7 +168,10 @@ const builtinValidators: Record<string, TypeValidator> = {
   },
 
   array(value, def, path, errors) {
-    if (!Array.isArray(value)) { errors.push({ path, message: `expected array, got ${typeof value}` }); return; }
+    if (!Array.isArray(value)) {
+      errors.push({ path, message: `expected array, got ${typeof value}` });
+      return;
+    }
     if (typeof def.minItems === 'number' && value.length < def.minItems)
       errors.push({ path, message: `min items ${def.minItems}, got ${value.length}` });
     if (typeof def.maxItems === 'number' && value.length > def.maxItems)
@@ -151,9 +179,10 @@ const builtinValidators: Record<string, TypeValidator> = {
 
     if (!def.items) return;
     // Typeless items with properties are object items.
-    const items: PropertySchema = def.items.type === undefined && def.items.properties
-      ? { ...def.items, type: 'object' }
-      : def.items;
+    const items: PropertySchema =
+      def.items.type === undefined && def.items.properties
+        ? { ...def.items, type: 'object' }
+        : def.items;
 
     for (let i = 0; i < value.length; i++) {
       const ip = `${path}[${i}]`;
@@ -163,7 +192,10 @@ const builtinValidators: Record<string, TypeValidator> = {
       // (Was: continue on null. Hid malformed arrays like [null, null] passing object schema.)
       // A null item passes only when the item schema itself admits null, as a required field's does.
       if (item === undefined || (item === null && !matches(null, items, ip))) {
-        errors.push({ path: ip, message: `expected ${items.type ?? 'value'}, got ${item === null ? 'null' : 'undefined'}` });
+        errors.push({
+          path: ip,
+          message: `expected ${items.type ?? 'value'}, got ${item === null ? 'null' : 'undefined'}`,
+        });
         continue;
       }
 
@@ -173,7 +205,10 @@ const builtinValidators: Record<string, TypeValidator> = {
 
   object(value, def, path, errors) {
     if (!isRecord(value)) {
-      errors.push({ path, message: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}` });
+      errors.push({
+        path,
+        message: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}`,
+      });
       return;
     }
     validateFields(value, def, path, errors, anyKey);
@@ -192,18 +227,27 @@ export function addTypeValidator(type: string, fn: TypeValidator): void {
 // ── Core ──
 
 // Every keyword present applies: `type` dispatches, anyOf/oneOf/allOf compose over the same value.
-export function validateValue(value: unknown, def: PropertySchema, path: string, errors: ValidationError[]): void {
+export function validateValue(
+  value: unknown,
+  def: PropertySchema,
+  path: string,
+  errors: ValidationError[],
+): void {
   if (def.type) typeValidators.get(def.type)?.(value, def, path, errors);
 
-  if (def.enum && !def.enum.some(allowed => allowed === value))
+  if (def.enum && !def.enum.some((allowed) => allowed === value))
     errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
 
-  if (def.anyOf && !def.anyOf.some(branch => matches(value, branch, path)))
+  if (def.anyOf && !def.anyOf.some((branch) => matches(value, branch, path)))
     errors.push({ path, message: `must match at least one of ${def.anyOf.length} anyOf schemas` });
 
   if (def.oneOf) {
-    const matched = def.oneOf.filter(branch => matches(value, branch, path)).length;
-    if (matched !== 1) errors.push({ path, message: `must match exactly one of ${def.oneOf.length} oneOf schemas, matched ${matched}` });
+    const matched = def.oneOf.filter((branch) => matches(value, branch, path)).length;
+    if (matched !== 1)
+      errors.push({
+        path,
+        message: `must match exactly one of ${def.oneOf.length} oneOf schemas, matched ${matched}`,
+      });
   }
 
   if (def.allOf) for (const branch of def.allOf) validateValue(value, branch, path, errors);
@@ -234,7 +278,7 @@ function validateFields(
   errors: ValidationError[],
   ownField: (key: string) => boolean,
 ): void {
-  const at = (key: string) => basePath ? `${basePath}.${key}` : key;
+  const at = (key: string) => (basePath ? `${basePath}.${key}` : key);
   const properties = def.properties ?? {};
 
   for (const key of def.required ?? []) {
@@ -253,18 +297,34 @@ function validateFields(
   if (extra === undefined || extra === true) return;
 
   for (const [key, val] of Object.entries(obj)) {
-    if (Object.hasOwn(properties, key) || !ownField(key) || val === undefined || val === null) continue;
+    if (Object.hasOwn(properties, key) || !ownField(key) || val === undefined || val === null)
+      continue;
     if (extra === false) errors.push({ path: at(key), message: `unexpected field` });
     else validateValue(val, extra, at(key), errors);
   }
 }
 
-export function validateComponent(comp: Component, schema: PropertySchema, field: string): ValidationError[] {
+export function validateComponent(
+  comp: Component,
+  schema: PropertySchema,
+  field: string,
+): ValidationError[] {
   const errors: ValidationError[] = [];
   validateFields(comp, schema, field || comp.$type, errors, isOwnField);
-  if (schema.anyOf || schema.oneOf || schema.allOf || schema.enum || schema.type && schema.type !== 'object') {
+  if (
+    schema.anyOf ||
+    schema.oneOf ||
+    schema.allOf ||
+    schema.enum ||
+    (schema.type && schema.type !== 'object')
+  ) {
     const fields = Object.fromEntries(Object.entries(comp).filter(([key]) => isOwnField(key)));
-    validateValue(fields, { ...schema, type: schema.type === 'object' ? undefined : schema.type }, field || comp.$type, errors);
+    validateValue(
+      fields,
+      { ...schema, type: schema.type === 'object' ? undefined : schema.type },
+      field || comp.$type,
+      errors,
+    );
   }
   return errors;
 }

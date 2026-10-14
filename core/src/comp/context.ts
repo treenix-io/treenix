@@ -57,14 +57,19 @@ const neverAborted = new AbortController().signal;
  *  instead of half-executing (core-anz4.18). deps stays undefined: actions
  *  with `needs` are skipped upstream, dep resolution is server-side. */
 export function predictionCtx<Node extends { readonly $path: string; readonly $type: string }>(
-  node: Node, comp?: object,
+  node: Node,
+  comp?: object,
 ): Pick<ExecCtx, 'tree' | 'signal'> & { node: Node; comp?: object; readonly nc: never } {
   return {
     node,
     comp,
     signal: neverAborted,
-    get tree(): never { throw new CtxUnavailableError('ctx.tree is server-only'); },
-    get nc(): never { throw new CtxUnavailableError('ctx.nc is server-only'); },
+    get tree(): never {
+      throw new CtxUnavailableError('ctx.tree is server-only');
+    },
+    get nc(): never {
+      throw new CtxUnavailableError('ctx.nc is server-only');
+    },
   };
 }
 

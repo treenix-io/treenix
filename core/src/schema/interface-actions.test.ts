@@ -10,7 +10,9 @@ test('generates native action declarations alongside implemented methods and dat
   const temp = fileURLToPath(new URL('../../../temp/', import.meta.url));
   await mkdir(temp, { recursive: true });
   const fixture = await mkdtemp(join(temp, 'interface-schema-'));
-  await writeFile(join(fixture, 'types.ts'), `
+  await writeFile(
+    join(fixture, 'types.ts'),
+    `
     import { registerType } from '@treenx/core/comp';
     class Widget {
       count = 0;
@@ -21,10 +23,13 @@ test('generates native action declarations alongside implemented methods and dat
       inspect(data: { path: string }): Promise<{ found: boolean }>;
     }
     registerType('test.native-widget', Widget);
-  `);
+  `,
+  );
 
   await generateSchemas([fixture]);
-  const schema: TypeSchema = JSON.parse(await readFile(join(fixture, 'schemas/test.native-widget.json'), 'utf8'));
+  const schema: TypeSchema = JSON.parse(
+    await readFile(join(fixture, 'schemas/test.native-widget.json'), 'utf8'),
+  );
   assert.deepEqual(schema.properties.count, { type: 'number', default: 0 });
   assert.deepEqual(schema.methods?.increment.arguments, []);
   assert.equal(schema.methods?.inspect.kind, 'read');

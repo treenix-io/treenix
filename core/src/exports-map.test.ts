@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { describe,it } from 'node:test';
+import { describe, it } from 'node:test';
 // Unused on purpose: tsc fails if the kernel door stops carrying the normative types.
 import { createInstance } from '#kernel/instance';
 
@@ -95,7 +95,8 @@ describe('exports map (qvrt)', () => {
   });
 
   it('public doors resolve via package self-reference', async () => {
-    for (const door of PUBLIC_DOORS) await import(door === '.' ? '@treenx/core' : `@treenx/core/${door.slice(2)}`);
+    for (const door of PUBLIC_DOORS)
+      await import(door === '.' ? '@treenx/core' : `@treenx/core/${door.slice(2)}`);
     const keys = await import('@treenx/core/kernel/store/keys');
     const storeTesting = await import('@treenx/core/kernel/testing');
     assert.equal(typeof keys.toStorageKeys, 'function');
@@ -107,8 +108,14 @@ describe('exports map (qvrt)', () => {
   it('the kernel door exports the canonical factory and native module authoring', async () => {
     const kernel = await import('@treenx/core/kernel');
     assert.deepEqual(Object.keys(kernel).sort(), [
-      'A', 'DEFAULT_LIMITS', 'R', 'W', 'createInstance',
-      'getActionContext', 'getActionLifetime', 'instantiateModule',
+      'A',
+      'DEFAULT_LIMITS',
+      'R',
+      'W',
+      'createInstance',
+      'getActionContext',
+      'getActionLifetime',
+      'instantiateModule',
     ]);
     assert.equal(kernel.createInstance, createInstance);
     assert.equal(typeof kernel.getActionLifetime, 'function');

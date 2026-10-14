@@ -40,9 +40,12 @@ export default function treenixServer(opts: TreenixServerOpts = {}): Plugin {
       child = spawn(
         process.execPath,
         ['--import', 'tsx', '--conditions=development', mainTs, configPath, ...(opts.args ?? [])],
-        { stdio: 'inherit', env: { ...process.env, NODE_ENV: process.env.NODE_ENV ?? 'development' } },
+        {
+          stdio: 'inherit',
+          env: { ...process.env, NODE_ENV: process.env.NODE_ENV ?? 'development' },
+        },
       );
-      child.on('exit', code => {
+      child.on('exit', (code) => {
         if (code !== 0 && code !== null) console.error(`[treenix-server] exited with code ${code}`);
       });
       const kill = () => child?.kill('SIGTERM');

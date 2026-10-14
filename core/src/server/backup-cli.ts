@@ -22,18 +22,27 @@ try {
     const deployment = index < 0 ? undefined : rest[index + 1];
     if (index >= 0 && (!deployment || deployment.startsWith('--'))) throw new Error(USAGE);
     const paths = index < 0 ? rest : [...rest.slice(0, index), ...rest.slice(index + 2)];
-    await backupInstance(paths[0] ?? 'root.json', paths[1] ?? 'backups', console.log, { deployment });
+    await backupInstance(paths[0] ?? 'root.json', paths[1] ?? 'backups', console.log, {
+      deployment,
+    });
   } else if (cmd === 'verify') {
     if (!rest[0]) throw new Error(USAGE);
     const m = await verifyArtifact(rest[0]);
-    console.log(`[verify] artifact ok: ${m.dirs.length} dirs, created ${m.createdAt}, engine ${m.engineVersion}`);
-    if (m.external.length) console.log(`[verify] external stores NOT in artifact: ${m.external.map((x) => x.type).join(', ')}`);
+    console.log(
+      `[verify] artifact ok: ${m.dirs.length} dirs, created ${m.createdAt}, engine ${m.engineVersion}`,
+    );
+    if (m.external.length)
+      console.log(
+        `[verify] external stores NOT in artifact: ${m.external.map((x) => x.type).join(', ')}`,
+      );
   } else if (cmd === 'restore') {
     if (!rest[0]) throw new Error(USAGE);
     const into = rest.includes('--into') ? rest[rest.indexOf('--into') + 1] : undefined;
     if (rest.includes('--into') && (!into || into.startsWith('--'))) throw new Error(USAGE);
     await restoreArtifact(rest[0], { into, replace: rest.includes('--replace') });
-    console.log('[restore] start the server to complete recovery (boot re-runs migrations and trash GC)');
+    console.log(
+      '[restore] start the server to complete recovery (boot re-runs migrations and trash GC)',
+    );
   } else {
     console.error(USAGE);
     process.exit(2);

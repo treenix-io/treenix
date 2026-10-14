@@ -14,14 +14,18 @@ export function debouncedWrite(
     timer = null;
     if (inFlight) return inFlight;
 
-    inFlight = Promise.resolve().then(fn).then(
-      () => { inFlight = null; },
-      (e: unknown) => {
-        inFlight = null;
-        console.error(`[${label}] write failed:`, e);
-        throw e;
-      },
-    );
+    inFlight = Promise.resolve()
+      .then(fn)
+      .then(
+        () => {
+          inFlight = null;
+        },
+        (e: unknown) => {
+          inFlight = null;
+          console.error(`[${label}] write failed:`, e);
+          throw e;
+        },
+      );
     return inFlight;
   }
 

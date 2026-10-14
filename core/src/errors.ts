@@ -6,7 +6,10 @@ import type { ErrorCode, KernelError as KernelErrorShape } from '#kernel/types';
 
 export class KernelError extends Error implements KernelErrorShape {
   override readonly name = 'KernelError';
-  constructor(public readonly code: ErrorCode, message: string) {
+  constructor(
+    public readonly code: ErrorCode,
+    message: string,
+  ) {
     super(message);
   }
 }

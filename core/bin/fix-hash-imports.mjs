@@ -6,7 +6,15 @@
 // Prevents dual-module issues in bundlers (Vite, webpack) that don't
 // fully support Node.js package.json "imports" field.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const pkgPath = resolve('package.json');
@@ -17,7 +25,7 @@ if (!imports) {
 }
 
 const distDir = resolve('dist');
-const assetArg = process.argv.find(a => a.startsWith('--assets-dir='));
+const assetArg = process.argv.find((a) => a.startsWith('--assets-dir='));
 const srcDir = resolve(assetArg ? assetArg.split('=')[1] : 'src');
 
 function resolveHash(specifier, scope) {
@@ -26,7 +34,10 @@ function resolveHash(specifier, scope) {
     if (pattern.includes('*')) {
       const [prefix, suffix] = pattern.split('*');
       if (specifier.startsWith(prefix) && (!suffix || specifier.endsWith(suffix))) {
-        const matched = specifier.slice(prefix.length, suffix ? -suffix.length || undefined : undefined);
+        const matched = specifier.slice(
+          prefix.length,
+          suffix ? -suffix.length || undefined : undefined,
+        );
         return resolveSpec(spec, matched, scope.directory);
       }
     }
@@ -35,7 +46,8 @@ function resolveHash(specifier, scope) {
 }
 
 function resolveSpec(spec, wildcard, directory) {
-  if (typeof spec === 'string') return tryFile(wildcard ? spec.replace('*', wildcard) : spec, directory);
+  if (typeof spec === 'string')
+    return tryFile(wildcard ? spec.replace('*', wildcard) : spec, directory);
   if (Array.isArray(spec)) {
     for (const s of spec) {
       const r = tryFile(wildcard ? s.replace('*', wildcard) : s, directory);
@@ -49,16 +61,23 @@ function resolveSpec(spec, wildcard, directory) {
 
 function tryFile(rel, directory) {
   const abs = resolve(directory, rel);
-  try { statSync(abs); return abs; } catch {}
+  try {
+    statSync(abs);
+    return abs;
+  } catch {}
   for (const ext of ['.js', '.jsx']) {
-    try { statSync(abs + ext); return abs + ext; } catch {}
+    try {
+      statSync(abs + ext);
+      return abs + ext;
+    } catch {}
   }
   return null;
 }
 
 const HASH_RE = /from\s+['"]#([^'"]+)['"]/g;
 const SPEC_RE = /(\bfrom\s+['"]|^\s*import\s+['"])(\.{1,2}\/[^'"]+)(['"])/gm;
-let files = 0, rewrites = 0;
+let files = 0,
+  rewrites = 0;
 
 function normalizeRelativeSpecifier(specifier) {
   if (specifier.endsWith('.ts') || specifier.endsWith('.tsx')) {
@@ -74,26 +93,46 @@ function normalizeRelativeSpecifier(specifier) {
 /** Nested source packages retain their own alias owner in the corresponding emitted directory. */
 function walk(dir, inheritedScope) {
   const sourcePackage = join(srcDir, relative(distDir, dir), 'package.json');
-  const scope = sourcePackage !== pkgPath && existsSync(sourcePackage)
-    ? { directory: dir, imports: JSON.parse(readFileSync(sourcePackage, 'utf-8')).imports }
-    : inheritedScope;
+  const scope =
+    sourcePackage !== pkgPath && existsSync(sourcePackage)
+      ? { directory: dir, imports: JSON.parse(readFileSync(sourcePackage, 'utf-8')).imports }
+      : inheritedScope;
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) { walk(full, scope); continue; }
-    if (!entry.name.endsWith('.js') && !entry.name.endsWith('.jsx') && !entry.name.endsWith('.d.ts')) continue;
+    if (entry.isDirectory()) {
+      walk(full, scope);
+      continue;
+    }
+    if (
+      !entry.name.endsWith('.js') &&
+      !entry.name.endsWith('.jsx') &&
+      !entry.name.endsWith('.d.ts')
+    )
+      continue;
 
     const src = readFileSync(full, 'utf-8');
-    if (!src.includes("'#") && !src.includes('"#')
-      && !src.includes("from './") && !src.includes('from "./')
-      && !src.includes("from '../") && !src.includes('from "../')
-      && !src.includes("import './") && !src.includes('import "./')
-      && !src.includes("import '../") && !src.includes('import "../')) continue;
+    if (
+      !src.includes("'#") &&
+      !src.includes('"#') &&
+      !src.includes("from './") &&
+      !src.includes('from "./') &&
+      !src.includes("from '../") &&
+      !src.includes('from "../') &&
+      !src.includes("import './") &&
+      !src.includes('import "./') &&
+      !src.includes("import '../") &&
+      !src.includes('import "../')
+    )
+      continue;
 
     let changed = false;
     let out = src.replace(HASH_RE, (match, specifier) => {
       const resolved = resolveHash('#' + specifier, scope);
-      if (!resolved) { console.warn(`  WARN: unresolved #${specifier} in ${full}`); return match; }
+      if (!resolved) {
+        console.warn(`  WARN: unresolved #${specifier} in ${full}`);
+        return match;
+      }
       let rel = relative(dirname(full), resolved);
       if (!rel.startsWith('.')) rel = './' + rel;
       changed = true;
@@ -109,7 +148,10 @@ function walk(dir, inheritedScope) {
       return `${prefix}${next}${suffix}`;
     });
 
-    if (changed) { writeFileSync(full, out); files++; }
+    if (changed) {
+      writeFileSync(full, out);
+      files++;
+    }
   }
 }
 
@@ -123,11 +165,19 @@ if (rewrites) console.log(`fix-hash-imports: ${rewrites} imports in ${files} fil
   function copyAssets(dir) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
-      if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) copyAssets(full); continue; }
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) copyAssets(full);
+        continue;
+      }
       if (full === pkgPath) continue;
-      if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')
-        || entry.name.endsWith('.json') && entry.name !== 'package.json'
-        && !/(^|[\\/])schemas([\\/]|$)/.test(dir)) continue;
+      if (
+        entry.name.endsWith('.ts') ||
+        entry.name.endsWith('.tsx') ||
+        (entry.name.endsWith('.json') &&
+          entry.name !== 'package.json' &&
+          !/(^|[\\/])schemas([\\/]|$)/.test(dir))
+      )
+        continue;
       const rel = relative(srcDir, full);
       const dest = join(distDir, rel);
       mkdirSync(dirname(dest), { recursive: true });

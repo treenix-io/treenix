@@ -25,7 +25,8 @@ export async function assertPathSafe(rootDir: string, file: string): Promise<voi
       if (missing && p !== dirname(p)) continue;
       throw e;
     }
-    if (!isInsideRoot(rootDir, real)) throw new KernelError('FORBIDDEN', 'Path escaped root via symlink');
+    if (!isInsideRoot(rootDir, real))
+      throw new KernelError('FORBIDDEN', 'Path escaped root via symlink');
     return;
   }
 }

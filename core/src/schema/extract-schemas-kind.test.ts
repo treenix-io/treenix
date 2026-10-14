@@ -7,7 +7,10 @@ const isJSDocError = (err: unknown) => err instanceof Error && err.name === 'JSD
 
 // A tag the kernel would refuse at run time: the JSDoc error carries the kernel's INVALID.
 const isKernelInvalid = (err: unknown) =>
-  isJSDocError(err) && err instanceof Error && err.cause instanceof KernelError && err.cause.code === 'INVALID';
+  isJSDocError(err) &&
+  err instanceof Error &&
+  err.cause instanceof KernelError &&
+  err.cause.code === 'INVALID';
 
 describe('parseJSDoc — kind tag whitelist', () => {
   it('rejects unknown tag without @x- prefix (typo detection)', () => {
@@ -53,7 +56,9 @@ describe('parseJSDoc — kind tag whitelist', () => {
     assert.throws(
       () => parseJSDoc('* @read\n* @write\n'),
       (err: unknown) =>
-        err instanceof Error && err.name === 'JSDocError' && /mutual|exclusiv|both|conflict/i.test(err.message),
+        err instanceof Error &&
+        err.name === 'JSDocError' &&
+        /mutual|exclusiv|both|conflict/i.test(err.message),
     );
   });
 
@@ -63,7 +68,13 @@ describe('parseJSDoc — kind tag whitelist', () => {
   });
 
   it('a kind or @io with a value throws', () => {
-    for (const doc of ['* @setuid false\n', '* @setuid no\n', '* @io false\n', '* @read yes\n', '* @write @io off\n'])
+    for (const doc of [
+      '* @setuid false\n',
+      '* @setuid no\n',
+      '* @io false\n',
+      '* @read yes\n',
+      '* @write @io off\n',
+    ])
       assert.throws(() => parseJSDoc(doc), isJSDocError, doc);
   });
 
@@ -103,11 +114,10 @@ describe('parseJSDoc — type tags', () => {
   });
 
   it('@alias lists earlier type names, across several tags', () => {
-    assert.deepEqual(parseJSDoc('* @alias shop.item shop.product\n* @alias legacy.item\n').aliases, [
-      'shop.item',
-      'shop.product',
-      'legacy.item',
-    ]);
+    assert.deepEqual(
+      parseJSDoc('* @alias shop.item shop.product\n* @alias legacy.item\n').aliases,
+      ['shop.item', 'shop.product', 'legacy.item'],
+    );
   });
 
   it('@alias without a name, with a repeated name or with a non-type name throws', () => {
@@ -117,23 +127,32 @@ describe('parseJSDoc — type tags', () => {
   });
 
   it('a JSDoc without type or action tags carries annotations only', () => {
-    assert.deepEqual(parseJSDoc('* Title line\n* @format email\n'), { annotations: { title: 'Title line', format: 'email' } });
+    assert.deepEqual(parseJSDoc('* Title line\n* @format email\n'), {
+      annotations: { title: 'Title line', format: 'email' },
+    });
   });
 });
 
 describe('parseJSDoc — pre and post', () => {
   it('@pre is a sift query in JSON over { node, needs }', () => {
-    assert.deepEqual(parseJSDoc('* @pre {"node.status": "open", "needs.stock.qty": {"$gt": 0}}\n').pre, {
-      'node.status': 'open',
-      'needs.stock.qty': { $gt: 0 },
-    });
+    assert.deepEqual(
+      parseJSDoc('* @pre {"node.status": "open", "needs.stock.qty": {"$gt": 0}}\n').pre,
+      {
+        'node.status': 'open',
+        'needs.stock.qty': { $gt: 0 },
+      },
+    );
   });
 
   it('@post is update operators per target in JSON', () => {
-    assert.deepEqual(parseJSDoc('* @post {"": {"$set": {"status": "done"}}, "stock": {"$inc": {"qty": -1}}}\n').post, {
-      '': { $set: { status: 'done' } },
-      stock: { $inc: { qty: -1 } },
-    });
+    assert.deepEqual(
+      parseJSDoc('* @post {"": {"$set": {"status": "done"}}, "stock": {"$inc": {"qty": -1}}}\n')
+        .post,
+      {
+        '': { $set: { status: 'done' } },
+        stock: { $inc: { qty: -1 } },
+      },
+    );
   });
 
   it('a JSON value runs over the following lines up to the next tag', () => {
@@ -151,12 +170,21 @@ describe('parseJSDoc — pre and post', () => {
   });
 
   it('@pre the evaluator refuses carries the kernel INVALID', () => {
-    for (const pre of ['{"node.x": {"$where": "1"}}', '{"node.x": {"$regex": "a"}}', '["node.x"]', '"node.x"'])
+    for (const pre of [
+      '{"node.x": {"$where": "1"}}',
+      '{"node.x": {"$regex": "a"}}',
+      '["node.x"]',
+      '"node.x"',
+    ])
       assert.throws(() => parseJSDoc(`* @pre ${pre}\n`), isKernelInvalid, pre);
   });
 
   it('@post that is not a Post carries the kernel INVALID', () => {
-    for (const post of ['{"": {"$rename": {"a": "b"}}}', '{"": {"$inc": {"n": "1"}}}', '["status"]'])
+    for (const post of [
+      '{"": {"$rename": {"a": "b"}}}',
+      '{"": {"$inc": {"n": "1"}}}',
+      '["status"]',
+    ])
       assert.throws(() => parseJSDoc(`* @post ${post}\n`), isKernelInvalid, post);
   });
 

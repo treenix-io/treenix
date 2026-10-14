@@ -18,10 +18,14 @@ export function parseYaml(input: string): YamlValue {
 
 function stripComment(line: string): string {
   // Strip `# ...` comments outside quoted strings. Cheap pass: scan once.
-  let inSingle = false, inDouble = false;
+  let inSingle = false,
+    inDouble = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '\\' && (inSingle || inDouble)) { i++; continue; }
+    if (c === '\\' && (inSingle || inDouble)) {
+      i++;
+      continue;
+    }
     if (c === '"' && !inSingle) inDouble = !inDouble;
     else if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (c === '#' && !inSingle && !inDouble) return line.slice(0, i).trimEnd();
@@ -50,8 +54,14 @@ function parseBlock(ctx: Ctx, indent: number): YamlValue {
 
   // Empty flow collections — what the emitter writes for {} and [].
   const firstRest = first.slice(firstIndent);
-  if (firstRest === '{}') { ctx.i++; return {}; }
-  if (firstRest === '[]') { ctx.i++; return []; }
+  if (firstRest === '{}') {
+    ctx.i++;
+    return {};
+  }
+  if (firstRest === '[]') {
+    ctx.i++;
+    return [];
+  }
 
   // Block array: lines starting with "- "
   if (firstRest.startsWith('- ') || firstRest === '-') {
@@ -66,7 +76,10 @@ function parseMapping(ctx: Ctx, indent: number): Record<string, YamlValue> {
   const out: Record<string, YamlValue> = {};
   while (ctx.i < ctx.lines.length) {
     const line = ctx.lines[ctx.i];
-    if (!line.trim()) { ctx.i++; continue; }
+    if (!line.trim()) {
+      ctx.i++;
+      continue;
+    }
     const ind = indentOf(line);
     if (ind < indent) break;
     if (ind > indent) throw new Error(`yaml: unexpected indent at line ${ctx.i + 1}`);
@@ -97,7 +110,10 @@ function parseBlockArray(ctx: Ctx, indent: number): YamlValue[] {
   const out: YamlValue[] = [];
   while (ctx.i < ctx.lines.length) {
     const line = ctx.lines[ctx.i];
-    if (!line.trim()) { ctx.i++; continue; }
+    if (!line.trim()) {
+      ctx.i++;
+      continue;
+    }
     const ind = indentOf(line);
     if (ind < indent) break;
     if (ind > indent) throw new Error(`yaml: unexpected indent in list at line ${ctx.i + 1}`);
@@ -115,7 +131,13 @@ function parseBlockArray(ctx: Ctx, indent: number): YamlValue[] {
     }
 
     ctx.i++;
-    out.push(after.trim() ? parseScalar(after.trim()) : (peekNext(ctx)?.indent ?? -1) > indent ? parseBlock(ctx, indent + 2) : null);
+    out.push(
+      after.trim()
+        ? parseScalar(after.trim())
+        : (peekNext(ctx)?.indent ?? -1) > indent
+          ? parseBlock(ctx, indent + 2)
+          : null,
+    );
   }
   return out;
 }
@@ -129,10 +151,14 @@ function peekNext(ctx: Ctx): { indent: number } | null {
 
 // Find the colon that separates key from value, ignoring colons inside quotes.
 function findKeyColon(s: string): number {
-  let inSingle = false, inDouble = false;
+  let inSingle = false,
+    inDouble = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    if (c === '\\' && (inSingle || inDouble)) { i++; continue; }
+    if (c === '\\' && (inSingle || inDouble)) {
+      i++;
+      continue;
+    }
     if (c === '"' && !inSingle) inDouble = !inDouble;
     else if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (c === ':' && !inSingle && !inDouble) {
@@ -147,7 +173,8 @@ const UNESCAPE: Record<string, string> = { n: '\n', r: '\r', t: '\t' };
 
 function unquote(s: string): string {
   if (s.length >= 2) {
-    const a = s[0], b = s[s.length - 1];
+    const a = s[0],
+      b = s[s.length - 1];
     if (a === '"' && b === '"') {
       // Double-quoted: decode the escapes the emitter writes (\n \r \t \\ \").
       return s.slice(1, -1).replace(/\\(.)/g, (_, c) => UNESCAPE[c] ?? c);
@@ -200,7 +227,9 @@ export function yamlScalar(s: string): string {
     /[\n\r\t]/.test(s) ||
     /^[\s]|[\s]$/.test(s) ||
     /[:#\[\]{}"'`,&*!|>%@]/.test(s) ||
-    /^(true|false|null|~|True|False|TRUE|FALSE|Null|NULL|yes|no|on|off|Yes|No|On|Off|YES|NO|ON|OFF)$/.test(s) ||
+    /^(true|false|null|~|True|False|TRUE|FALSE|Null|NULL|yes|no|on|off|Yes|No|On|Off|YES|NO|ON|OFF)$/.test(
+      s,
+    ) ||
     /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(s) ||
     /^-/.test(s);
   if (!needsQuote) return s;
@@ -225,7 +254,9 @@ export function emitYaml(value: unknown, indent: number = 0): string {
   if (typeof value === 'string') return yamlScalar(value);
   if (Array.isArray(value)) {
     if (value.some((v) => v !== null && typeof v === 'object')) {
-      throw new Error('emitYaml: arrays of objects/nested arrays are not roundtrippable in this YAML subset');
+      throw new Error(
+        'emitYaml: arrays of objects/nested arrays are not roundtrippable in this YAML subset',
+      );
     }
     return '[' + value.map((v) => emitYaml(v)).join(', ') + ']';
   }
@@ -253,10 +284,16 @@ function emitMapping(obj: Record<string, unknown>, indent: number): string {
 function splitFlow(body: string): string[] {
   // Split top-level commas, respecting quotes.
   const out: string[] = [];
-  let depth = 0, inSingle = false, inDouble = false, start = 0;
+  let depth = 0,
+    inSingle = false,
+    inDouble = false,
+    start = 0;
   for (let i = 0; i < body.length; i++) {
     const c = body[i];
-    if (c === '\\' && (inSingle || inDouble)) { i++; continue; }
+    if (c === '\\' && (inSingle || inDouble)) {
+      i++;
+      continue;
+    }
     if (c === '"' && !inSingle) inDouble = !inDouble;
     else if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (!inSingle && !inDouble) {

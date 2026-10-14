@@ -7,7 +7,7 @@ import { before, describe, it } from 'node:test';
 
 const schemas = new Map<string, TypeSchema>();
 function collectSchemas(root: string): void {
-  visitSchemaDirectories(root, directory => {
+  visitSchemaDirectories(root, (directory) => {
     const entries = readSchemasFromDir(directory);
     for (const schema of entries) schemas.set(schema.$id, schema);
     return entries.length;
@@ -49,7 +49,7 @@ describe('schema loader', () => {
     for (const type of types) {
       const schema = getSchema(type);
       const props = Object.values(schema.properties);
-      if (props.length > 0 && props.every(property => property.title)) withTitles++;
+      if (props.length > 0 && props.every((property) => property.title)) withTitles++;
     }
     assert.ok(withTitles > 0, 'no schemas have fully titled properties');
   });
@@ -67,15 +67,23 @@ describe('schema loader', () => {
     assert.ok(ms, 'mailService property missing');
     assert.equal(ms.format, 'path', 'format should be path');
     assert.equal(ms.refType, 'cafe.mail', 'refType should reference cafe.mail');
-    assert.equal(schema.properties.recipient.refType, undefined, 'recipient should not have refType');
+    assert.equal(
+      schema.properties.recipient.refType,
+      undefined,
+      'recipient should not have refType',
+    );
   });
 
   it('class declarations work independently of schema loading', () => {
     const schema: TypeSchema = {
-      $id: 'test.type', type: 'object', title: 'Test',
+      $id: 'test.type',
+      type: 'object',
+      title: 'Test',
       properties: { name: { type: 'string', title: 'Name' } },
     };
-    class TestType { name = ''; }
+    class TestType {
+      name = '';
+    }
     const declaration = declareClientType('test.type', TestType);
     assert.equal(normalizeType(TestType), 'test.type');
     assert.equal(declaration.type, schema.$id);

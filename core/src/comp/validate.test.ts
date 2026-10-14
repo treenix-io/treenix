@@ -4,7 +4,11 @@ import type { PropertySchema, TypeSchema } from '#schema/types';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  addTypeValidator, assertSafeSchema, validateComponent, validateValue, type ValidationError,
+  addTypeValidator,
+  assertSafeSchema,
+  validateComponent,
+  validateValue,
+  type ValidationError,
 } from './validate';
 
 // Helper: collect errors from validateValue
@@ -15,7 +19,6 @@ function check(value: unknown, def: Partial<PropertySchema>, path = 'x'): Valida
 }
 
 describe('validateValue', () => {
-
   // ── String ──
 
   describe('string', () => {
@@ -87,7 +90,10 @@ describe('validateValue', () => {
 
     it('enum', () => {
       assert.equal(check(2, { type: 'number', enum: [1, 2] }).length, 0);
-      assert.deepEqual(check(3, { type: 'number', enum: [1, 2] }).map(e => e.path), ['x']);
+      assert.deepEqual(
+        check(3, { type: 'number', enum: [1, 2] }).map((e) => e.path),
+        ['x'],
+      );
     });
   });
 
@@ -119,8 +125,14 @@ describe('validateValue', () => {
     });
 
     it('rejects a fraction and a non-number', () => {
-      assert.deepEqual(check(1.5, { type: 'integer' }).map(e => e.path), ['x']);
-      assert.deepEqual(check('5', { type: 'integer' }).map(e => e.path), ['x']);
+      assert.deepEqual(
+        check(1.5, { type: 'integer' }).map((e) => e.path),
+        ['x'],
+      );
+      assert.deepEqual(
+        check('5', { type: 'integer' }).map((e) => e.path),
+        ['x'],
+      );
     });
 
     it('keeps the number bounds', () => {
@@ -215,16 +227,28 @@ describe('validateValue', () => {
     });
 
     it('accepts null items when the item schema admits null', () => {
-      assert.equal(check([1, null], { type: 'array', items: { anyOf: [{ type: 'number' }, {}] } }).length, 0);
+      assert.equal(
+        check([1, null], { type: 'array', items: { anyOf: [{ type: 'number' }, {}] } }).length,
+        0,
+      );
 
-      const numOrNull: PropertySchema = { type: 'array', items: { anyOf: [{ type: 'number' }, { type: 'null' }] } };
+      const numOrNull: PropertySchema = {
+        type: 'array',
+        items: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+      };
       assert.equal(check([null, 2], numOrNull).length, 0);
-      assert.deepEqual(check([null, 'a'], numOrNull).map(e => e.path), ['x[1]']);
+      assert.deepEqual(
+        check([null, 'a'], numOrNull).map((e) => e.path),
+        ['x[1]'],
+      );
     });
 
     it('rejects null items against an object item schema', () => {
       const e = check([null], { type: 'array', items: { type: 'object', properties: {} } });
-      assert.deepEqual(e.map(x => x.path), ['x[0]']);
+      assert.deepEqual(
+        e.map((x) => x.path),
+        ['x[0]'],
+      );
     });
 
     it('rejects non-object when properties expected', () => {
@@ -332,17 +356,26 @@ describe('validateValue', () => {
 
     it('a required field whose schema rejects null still counts null as missing', () => {
       const e = check([{ path: null, expectedRev: null, actualRev: 3 }], conflicts);
-      assert.deepEqual(e.map(x => x.path), ['x[0].path']);
+      assert.deepEqual(
+        e.map((x) => x.path),
+        ['x[0].path'],
+      );
     });
 
     it('a required field absent from properties counts null as missing', () => {
       const e = check({ x: null }, { type: 'object', required: ['x'] }, 'obj');
-      assert.deepEqual(e.map(x => x.path), ['obj.x']);
+      assert.deepEqual(
+        e.map((x) => x.path),
+        ['obj.x'],
+      );
     });
 
     it('a required nullable field still has to be present', () => {
       const e = check([{ path: '/a', actualRev: 3 }], conflicts);
-      assert.deepEqual(e.map(x => x.path), ['x[0].expectedRev']);
+      assert.deepEqual(
+        e.map((x) => x.path),
+        ['x[0].expectedRev'],
+      );
     });
   });
 
@@ -484,7 +517,10 @@ describe('validateComponent', () => {
     };
     assert.equal(validateComponent({ $type: 'test', rev: null }, schema, 'test').length, 0);
     assert.equal(validateComponent({ $type: 'test', rev: 2 }, schema, 'test').length, 0);
-    assert.deepEqual(validateComponent({ $type: 'test', rev: 'a' }, schema, 'test').map(e => e.path), ['test.rev']);
+    assert.deepEqual(
+      validateComponent({ $type: 'test', rev: 'a' }, schema, 'test').map((e) => e.path),
+      ['test.rev'],
+    );
   });
 
   it('allows null on an optional field (null = absent)', () => {
@@ -542,54 +578,107 @@ describe('anyOf / oneOf / allOf', () => {
     const intOrStr: PropertySchema = { anyOf: [{ type: 'integer' }, { type: 'string' }] };
     assert.equal(check(2, intOrStr).length, 0);
     assert.equal(check('a', intOrStr).length, 0);
-    assert.deepEqual(check(true, intOrStr).map(e => e.path), ['x']);
-    assert.deepEqual(check(1.5, intOrStr).map(e => e.path), ['x']);
+    assert.deepEqual(
+      check(true, intOrStr).map((e) => e.path),
+      ['x'],
+    );
+    assert.deepEqual(
+      check(1.5, intOrStr).map((e) => e.path),
+      ['x'],
+    );
   });
 
   it('a literal union admits only its literals', () => {
-    const oneOrA: PropertySchema = { anyOf: [{ type: 'number', enum: [1] }, { type: 'string', enum: ['a'] }] };
+    const oneOrA: PropertySchema = {
+      anyOf: [
+        { type: 'number', enum: [1] },
+        { type: 'string', enum: ['a'] },
+      ],
+    };
     assert.equal(check(1, oneOrA).length, 0);
     assert.equal(check('a', oneOrA).length, 0);
-    assert.deepEqual(check(7, oneOrA).map(e => e.path), ['x']);
-    assert.deepEqual(check('b', oneOrA).map(e => e.path), ['x']);
+    assert.deepEqual(
+      check(7, oneOrA).map((e) => e.path),
+      ['x'],
+    );
+    assert.deepEqual(
+      check('b', oneOrA).map((e) => e.path),
+      ['x'],
+    );
   });
 
   it('oneOf integer-or-null matches exactly one branch for each admitted value', () => {
     const intOrNull: PropertySchema = { oneOf: [{ type: 'integer' }, { type: 'null' }] };
     assert.equal(check(5, intOrNull).length, 0);
     assert.equal(check(null, intOrNull).length, 0);
-    assert.deepEqual(check('a', intOrNull).map(e => e.path), ['x']);
+    assert.deepEqual(
+      check('a', intOrNull).map((e) => e.path),
+      ['x'],
+    );
   });
 
   it('anyOf applies to object fields and array items', () => {
     const levels: PropertySchema = {
       type: 'object',
       properties: {
-        level: { anyOf: [{ type: 'string', enum: ['info', 'warn'] }, { type: 'array', items: { type: 'string', enum: ['info', 'warn'] } }] },
+        level: {
+          anyOf: [
+            { type: 'string', enum: ['info', 'warn'] },
+            { type: 'array', items: { type: 'string', enum: ['info', 'warn'] } },
+          ],
+        },
       },
     };
     assert.equal(check({ level: ['warn'] }, levels).length, 0);
-    assert.deepEqual(check({ level: 'debug' }, levels).map(e => e.path), ['x.level']);
-    assert.deepEqual(check([1, true, 'a'], { type: 'array', items: numOrStr }).map(e => e.path), ['x[1]']);
+    assert.deepEqual(
+      check({ level: 'debug' }, levels).map((e) => e.path),
+      ['x.level'],
+    );
+    assert.deepEqual(
+      check([1, true, 'a'], { type: 'array', items: numOrStr }).map((e) => e.path),
+      ['x[1]'],
+    );
   });
 
   it('type and anyOf both apply', () => {
-    const def: PropertySchema = { type: 'string', anyOf: [{ type: 'string', minLength: 3 }, { type: 'string', enum: ['a'] }] };
+    const def: PropertySchema = {
+      type: 'string',
+      anyOf: [
+        { type: 'string', minLength: 3 },
+        { type: 'string', enum: ['a'] },
+      ],
+    };
     assert.equal(check('a', def).length, 0);
     assert.equal(check('ab', def).length, 1);
     assert.equal(check(5, def).length, 2);
   });
 
   it('oneOf needs exactly one matching branch', () => {
-    const def: PropertySchema = { oneOf: [{ type: 'number', minimum: 0 }, { type: 'number', maximum: 10 }] };
+    const def: PropertySchema = {
+      oneOf: [
+        { type: 'number', minimum: 0 },
+        { type: 'number', maximum: 10 },
+      ],
+    };
     assert.equal(check(-5, def).length, 0);
     assert.equal(check(50, def).length, 0);
-    assert.deepEqual(check(5, def).map(e => e.path), ['x']);
-    assert.deepEqual(check('a', def).map(e => e.path), ['x']);
+    assert.deepEqual(
+      check(5, def).map((e) => e.path),
+      ['x'],
+    );
+    assert.deepEqual(
+      check('a', def).map((e) => e.path),
+      ['x'],
+    );
   });
 
   it('allOf reports every failing branch', () => {
-    const def: PropertySchema = { allOf: [{ type: 'string', minLength: 5 }, { type: 'string', pattern: '^\\d+$' }] };
+    const def: PropertySchema = {
+      allOf: [
+        { type: 'string', minLength: 5 },
+        { type: 'string', pattern: '^\\d+$' },
+      ],
+    };
     assert.equal(check('12345', def).length, 0);
     assert.equal(check('abc', def).length, 2);
   });
@@ -598,33 +687,66 @@ describe('anyOf / oneOf / allOf', () => {
 // ── additionalProperties ──
 
 describe('additionalProperties', () => {
-  const closed: PropertySchema = { type: 'object', properties: { a: { type: 'number' } }, additionalProperties: false };
+  const closed: PropertySchema = {
+    type: 'object',
+    properties: { a: { type: 'number' } },
+    additionalProperties: false,
+  };
 
   it('false rejects an undeclared field', () => {
     assert.equal(check({ a: 1 }, closed).length, 0);
-    assert.deepEqual(check({ a: 1, b: 2 }, closed).map(e => e.path), ['x.b']);
+    assert.deepEqual(
+      check({ a: 1, b: 2 }, closed).map((e) => e.path),
+      ['x.b'],
+    );
   });
 
   it('a schema validates every undeclared field', () => {
-    const def: PropertySchema = { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: { type: 'number' } };
-    assert.deepEqual(check({ a: 's', b: 'no', c: 3 }, def).map(e => e.path), ['x.b']);
+    const def: PropertySchema = {
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      additionalProperties: { type: 'number' },
+    };
+    assert.deepEqual(
+      check({ a: 's', b: 'no', c: 3 }, def).map((e) => e.path),
+      ['x.b'],
+    );
   });
 
   it('true or absent leaves undeclared fields open', () => {
     assert.equal(check({ a: 1, b: 2 }, { ...closed, additionalProperties: true }).length, 0);
-    assert.equal(check({ a: 1, b: 2 }, { type: 'object', properties: { a: { type: 'number' } } }).length, 0);
+    assert.equal(
+      check({ a: 1, b: 2 }, { type: 'object', properties: { a: { type: 'number' } } }).length,
+      0,
+    );
   });
 
   it('applies to array items', () => {
     const def: PropertySchema = { type: 'array', items: closed };
-    assert.deepEqual(check([{ a: 1 }, { a: 2, z: 0 }], def).map(e => e.path), ['x[1].z']);
+    assert.deepEqual(
+      check([{ a: 1 }, { a: 2, z: 0 }], def).map((e) => e.path),
+      ['x[1].z'],
+    );
   });
 
-  it('a component keeps its $ fields and the node\'s # components out of it', () => {
-    const schema: TypeSchema = { type: 'object', properties: { a: { type: 'number' } }, additionalProperties: false };
-    const node: ComponentData = { $type: 'test.closed', $v: 1, $order: 'a0', a: 1, '#named': { $type: 'test.other' } };
+  it("a component keeps its $ fields and the node's # components out of it", () => {
+    const schema: TypeSchema = {
+      type: 'object',
+      properties: { a: { type: 'number' } },
+      additionalProperties: false,
+    };
+    const node: ComponentData = {
+      $type: 'test.closed',
+      $v: 1,
+      $order: 'a0',
+      a: 1,
+      '#named': { $type: 'test.other' },
+    };
     assert.equal(validateComponent(node, schema, '').length, 0);
-    assert.deepEqual(validateComponent({ ...node, b: 2 }, schema, '').map(e => e.path), ['test.closed.b']);
+    assert.deepEqual(
+      validateComponent({ ...node, b: 2 }, schema, '').map((e) => e.path),
+      ['test.closed.b'],
+    );
   });
 });
 
@@ -636,7 +758,10 @@ describe('pattern guard', () => {
   });
 
   it('an oversize pattern in a code-registered schema is INVALID', () => {
-    assert.throws(() => check('a', { type: 'string', pattern: 'a'.repeat(300) }), isCode('INVALID'));
+    assert.throws(
+      () => check('a', { type: 'string', pattern: 'a'.repeat(300) }),
+      isCode('INVALID'),
+    );
   });
 
   it('a malformed pattern in a code-registered schema is INVALID', () => {
@@ -653,11 +778,17 @@ describe('pattern guard', () => {
 
 describe('assertSafeSchema', () => {
   it('rejects nested quantifiers anywhere in the schema', () => {
-    assert.throws(() => assertSafeSchema({ properties: { x: { anyOf: [{ pattern: '(a*)*' }] } } }, 't'), isCode('INVALID'));
+    assert.throws(
+      () => assertSafeSchema({ properties: { x: { anyOf: [{ pattern: '(a*)*' }] } } }, 't'),
+      isCode('INVALID'),
+    );
   });
 
   it('rejects a malformed pattern before anything validates against it', () => {
-    assert.throws(() => assertSafeSchema({ properties: { x: { type: 'string', pattern: '[' } } }, 't'), isCode('INVALID'));
+    assert.throws(
+      () => assertSafeSchema({ properties: { x: { type: 'string', pattern: '[' } } }, 't'),
+      isCode('INVALID'),
+    );
   });
 
   it('rejects a schema deeper than the cap', () => {
@@ -667,44 +798,87 @@ describe('assertSafeSchema', () => {
   });
 
   it('accepts an ordinary schema', () => {
-    assert.doesNotThrow(() => assertSafeSchema({ properties: { x: { type: 'string', pattern: '^[a-z]+$' } } }, 't'));
+    assert.doesNotThrow(() =>
+      assertSafeSchema({ properties: { x: { type: 'string', pattern: '^[a-z]+$' } } }, 't'),
+    );
   });
 
   it('rejects a keyword of the wrong shape as INVALID, at any depth and in methods', () => {
     const wrong: Record<string, unknown>[] = [
-      { anyOf: 'a' }, { oneOf: {} }, { allOf: ['x'] }, { anyOf: [null] },
-      { enum: 'a' }, { required: 'a' }, { required: [1] },
-      { additionalProperties: 'no' }, { properties: [] }, { properties: { x: 'string' } }, { items: 'x' },
-      { type: 5 }, { pattern: 5 }, { maxLength: '5' },
+      { anyOf: 'a' },
+      { oneOf: {} },
+      { allOf: ['x'] },
+      { anyOf: [null] },
+      { enum: 'a' },
+      { required: 'a' },
+      { required: [1] },
+      { additionalProperties: 'no' },
+      { properties: [] },
+      { properties: { x: 'string' } },
+      { items: 'x' },
+      { type: 5 },
+      { pattern: 5 },
+      { maxLength: '5' },
     ];
 
     for (const shape of wrong) {
       const label = JSON.stringify(shape);
       assert.throws(() => assertSafeSchema(shape, 't'), isCode('INVALID'), label);
-      assert.throws(() => assertSafeSchema({ properties: { x: { items: shape } } }, 't'), isCode('INVALID'), label);
-      assert.throws(() => assertSafeSchema({ methods: { go: { arguments: [shape] } } }, 't'), isCode('INVALID'), label);
+      assert.throws(
+        () => assertSafeSchema({ properties: { x: { items: shape } } }, 't'),
+        isCode('INVALID'),
+        label,
+      );
+      assert.throws(
+        () => assertSafeSchema({ methods: { go: { arguments: [shape] } } }, 't'),
+        isCode('INVALID'),
+        label,
+      );
     }
 
-    for (const methods of ['x', { go: 'x' }, { go: { arguments: {} } }, { go: { arguments: [], return: 'x' } }])
-      assert.throws(() => assertSafeSchema({ methods }, 't'), isCode('INVALID'), JSON.stringify(methods));
+    for (const methods of [
+      'x',
+      { go: 'x' },
+      { go: { arguments: {} } },
+      { go: { arguments: [], return: 'x' } },
+    ])
+      assert.throws(
+        () => assertSafeSchema({ methods }, 't'),
+        isCode('INVALID'),
+        JSON.stringify(methods),
+      );
   });
 
   it('a pattern inside a method argument schema is checked', () => {
     assert.throws(
-      () => assertSafeSchema({ methods: { go: { arguments: [{ properties: { x: { pattern: '(a+)+' } } }] } } }, 't'),
+      () =>
+        assertSafeSchema(
+          { methods: { go: { arguments: [{ properties: { x: { pattern: '(a+)+' } } }] } } },
+          't',
+        ),
       isCode('INVALID'),
     );
   });
 
   it('accepts every keyword in its shape, and data under default and enum as data', () => {
     const schema = {
-      type: 'object', required: ['a'], additionalProperties: false,
+      type: 'object',
+      required: ['a'],
+      additionalProperties: false,
       properties: {
         a: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
         b: { type: 'array', items: { oneOf: [{ enum: [1, 'x', null] }] }, maxItems: 3 },
-        c: { allOf: [{ type: 'object', additionalProperties: { type: 'number' } }], default: { anyOf: 'data' } },
+        c: {
+          allOf: [{ type: 'object', additionalProperties: { type: 'number' } }],
+          default: { anyOf: 'data' },
+        },
       },
-      methods: { go: { arguments: [{ name: 'data', type: 'object', properties: {} }], return: { type: 'number' } } },
+      methods: {
+        go: {
+          arguments: [{ name: 'data', type: 'object', properties: {} }],
+          return: { type: 'number' },
+        },
+      },
     };
     assert.doesNotThrow(() => assertSafeSchema(schema, 't'));
   });

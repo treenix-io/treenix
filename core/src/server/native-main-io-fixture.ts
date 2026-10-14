@@ -43,9 +43,23 @@ const exchange: ActionDef = {
 export default function cliIoModule(): NativeModuleDeployment {
   const id = 'cli-io-fixture';
   const schema = { $id: 'cli.io', type: 'object' as const, properties: {} };
-  return { manifest: { ...declareOpenModule(id, [
-    { type: 'cli.io', context: 'schema', handler: () => schema },
-    { type: 'cli.io', context: 'action:exchange', handler: exchange },
-  ]), types: [buildRegisteredTypeDef({ name: 'cli.io', module: id, security: 'ordinary',
-    schema, methods: [], actions: { exchange } })], security: [] } };
+  return {
+    manifest: {
+      ...declareOpenModule(id, [
+        { type: 'cli.io', context: 'schema', handler: () => schema },
+        { type: 'cli.io', context: 'action:exchange', handler: exchange },
+      ]),
+      types: [
+        buildRegisteredTypeDef({
+          name: 'cli.io',
+          module: id,
+          security: 'ordinary',
+          schema,
+          methods: [],
+          actions: { exchange },
+        }),
+      ],
+      security: [],
+    },
+  };
 }

@@ -23,14 +23,22 @@ export class VersionedDoc {
 const documentDeclaration = declareClientType('example.versioned.doc', VersionedDoc);
 
 export const documentMigrations: readonly Migration[] = [
-  { from: 0, to: 1, up: n => {
-    const { text, ...fields } = n;
-    return { ...fields, body: typeof text === 'string' ? text : '' };
-  } },
-  { from: 1, to: 2, up: n => {
-    const body = String(n.body ?? '').trim();
-    return { ...n, words: body ? body.split(/\s+/).length : 0 };
-  } },
+  {
+    from: 0,
+    to: 1,
+    up: (n) => {
+      const { text, ...fields } = n;
+      return { ...fields, body: typeof text === 'string' ? text : '' };
+    },
+  },
+  {
+    from: 1,
+    to: 2,
+    up: (n) => {
+      const body = String(n.body ?? '').trim();
+      return { ...n, words: body ? body.split(/\s+/).length : 0 };
+    },
+  },
 ];
 
 /**
@@ -43,10 +51,16 @@ export class VersionedNote {
 const noteDeclaration = declareClientType('example.versioned.note', VersionedNote);
 
 export const noteMigrations: readonly Migration[] = [
-  { from: 0, to: 1, up: n => {
-    const { txt, ...fields } = n;
-    return { ...fields, note: typeof txt === 'string' ? txt : '' };
-  } },
+  {
+    from: 0,
+    to: 1,
+    up: (n) => {
+      const { txt, ...fields } = n;
+      return { ...fields, note: typeof txt === 'string' ? txt : '' };
+    },
+  },
 ];
 
-export const clientModules = [declareOpenModule('example.versioned/types', [], [documentDeclaration, noteDeclaration])];
+export const clientModules = [
+  declareOpenModule('example.versioned/types', [], [documentDeclaration, noteDeclaration]),
+];

@@ -13,9 +13,10 @@ async function jsonFixture(directory: string) {
   await mkdir(directory, { recursive: true });
   return {
     async set(node: NodeData) {
-      const file = node.$path === '/'
-        ? join(directory, '$.json')
-        : join(directory, node.$path.slice(1) + '.json');
+      const file =
+        node.$path === '/'
+          ? join(directory, '$.json')
+          : join(directory, node.$path.slice(1) + '.json');
       await mkdir(dirname(file), { recursive: true });
       await writeFile(file, JSON.stringify({ ...node, $rev: 1 }));
     },
@@ -39,9 +40,13 @@ describe('instance backup/restore (gk8.9)', () => {
     await writeFile(join(baseDir, DATA_VERSION_FILE), String(SUPPORTED_DATA_VERSION));
     await base.set(createNode('/', 'root'));
     await mkdir(join(baseDir, 'app'), { recursive: true });
-    await writeFile(join(baseDir, 'app', '$.json'), JSON.stringify({
-      ...createNode('/app', 'dir', { title: 'App' }), $rev: 1,
-    }));
+    await writeFile(
+      join(baseDir, 'app', '$.json'),
+      JSON.stringify({
+        ...createNode('/app', 'dir', { title: 'App' }),
+        $rev: 1,
+      }),
+    );
     await base.set(createNode('/app/config', 'dir', { theme: 'dark' }));
 
     const work = await jsonFixture(workDir);
@@ -49,12 +54,20 @@ describe('instance backup/restore (gk8.9)', () => {
     await work.set(createNode('/', 'root'));
     await work.set(createNode('/notes', 'dir', { body: 'hello' }));
 
-    await writeFile(rootJson, JSON.stringify({
-      $path: '/', $type: 'root',
-      '#mount': { $type: 't.mount.overlay', layers: ['base', 'work'] },
-      '#base': { $type: 't.mount.fs', root: baseDir },
-      '#work': { $type: 't.mount.fs', root: workDir },
-    }, null, 2));
+    await writeFile(
+      rootJson,
+      JSON.stringify(
+        {
+          $path: '/',
+          $type: 'root',
+          '#mount': { $type: 't.mount.overlay', layers: ['base', 'work'] },
+          '#base': { $type: 't.mount.fs', root: baseDir },
+          '#work': { $type: 't.mount.fs', root: workDir },
+        },
+        null,
+        2,
+      ),
+    );
   }
 
   beforeEach(async () => {
@@ -81,7 +94,10 @@ describe('instance backup/restore (gk8.9)', () => {
     assert.equal(manifest.rootConfig, 'root.json');
     assert.equal(manifest.dirs.length, 2);
     assert.ok(manifest.dirs.every((d) => d.kind === 'fs' && d.nodes > 0));
-    assert.ok(manifest.dirs.every((d) => d.files >= 1), 'version marker counted as file');
+    assert.ok(
+      manifest.dirs.every((d) => d.files >= 1),
+      'version marker counted as file',
+    );
     assert.ok(manifest.engineVersion.length > 0);
 
     const top = await readdir(artifactDir);
@@ -89,7 +105,10 @@ describe('instance backup/restore (gk8.9)', () => {
     assert.ok(top.includes('root.json'));
     assert.ok(top.includes('dirs'));
 
-    const copied = await readFile(join(artifactDir, manifest.dirs[0].artifactPath, 'app', '$.json'), 'utf-8');
+    const copied = await readFile(
+      join(artifactDir, manifest.dirs[0].artifactPath, 'app', '$.json'),
+      'utf-8',
+    );
     assert.equal(JSON.parse(copied).title, 'App');
   });
 
@@ -118,7 +137,15 @@ describe('instance backup/restore (gk8.9)', () => {
     assert.deepEqual(await readFile(join(first.artifactDir, 'manifest.json')), oldManifest);
     assert.deepEqual(await readFile(savedNode), oldNode);
     const newEntry = second.manifest.dirs.find((d) => d.root === baseDir)!;
-    assert.equal(JSON.parse(await readFile(join(second.artifactDir, newEntry.artifactPath, 'app', 'config.json'), 'utf-8')).theme, 'light');
+    assert.equal(
+      JSON.parse(
+        await readFile(
+          join(second.artifactDir, newEntry.artifactPath, 'app', 'config.json'),
+          'utf-8',
+        ),
+      ).theme,
+      'light',
+    );
     assert.equal((await readdir(out)).length, 2);
     await verifyArtifact(first.artifactDir, silent);
     await verifyArtifact(second.artifactDir, silent);
@@ -129,10 +156,23 @@ describe('instance backup/restore (gk8.9)', () => {
     const first = await backupInstance(rootJson, out, silent);
     const config = await readFile(rootJson, 'utf-8');
     const oldManifest = await readFile(join(first.artifactDir, 'manifest.json'));
-    await writeFile(rootJson, JSON.stringify(createNode('/', 'root', {}, {
-      mount: { $type: 't.mount.fs', root: join(tmp, 'missing') },
-    })));
-    await assert.rejects(() => backupInstance(rootJson, out, silent), (error: unknown) => error instanceof BackupError && error.code === 'BAD_MOUNT');
+    await writeFile(
+      rootJson,
+      JSON.stringify(
+        createNode(
+          '/',
+          'root',
+          {},
+          {
+            mount: { $type: 't.mount.fs', root: join(tmp, 'missing') },
+          },
+        ),
+      ),
+    );
+    await assert.rejects(
+      () => backupInstance(rootJson, out, silent),
+      (error: unknown) => error instanceof BackupError && error.code === 'BAD_MOUNT',
+    );
 
     await writeFile(rootJson, config);
     const next = await backupInstance(rootJson, out, silent);
@@ -151,7 +191,11 @@ describe('instance backup/restore (gk8.9)', () => {
     await rm(rootJson);
     await restoreArtifact(artifactDir, {}, silent);
 
-    assert.equal(await readFile(rootJson, 'utf-8'), configBytes, 'config restored at its original path');
+    assert.equal(
+      await readFile(rootJson, 'utf-8'),
+      configBytes,
+      'config restored at its original path',
+    );
     const base = await jsonFixture(baseDir);
     const node = await base.get('/app/config');
     assert.ok(node);
@@ -166,7 +210,9 @@ describe('instance backup/restore (gk8.9)', () => {
     await extra.set(createNode('/deep', 'dir', { v: 1 }));
 
     const work = await jsonFixture(workDir);
-    await work.set(createNode('/mnt', 'mount-point', {}, { mount: { $type: 't.mount.fs', root: extraDir } }));
+    await work.set(
+      createNode('/mnt', 'mount-point', {}, { mount: { $type: 't.mount.fs', root: extraDir } }),
+    );
 
     const { manifest } = await backupInstance(rootJson, out, silent);
     const roots = manifest.dirs.map((d) => d.root);
@@ -175,9 +221,21 @@ describe('instance backup/restore (gk8.9)', () => {
 
   it('lists mongo mounts as external — db/collection in manifest, URI only in data files', async () => {
     const work = await jsonFixture(workDir);
-    await work.set(createNode('/db', 'mount-point', {}, {
-      mount: { $type: 't.mount.mongo', uri: 'mongodb://admin:s3cret@host/x', db: 'mydb', collection: 'data' },
-    }));
+    await work.set(
+      createNode(
+        '/db',
+        'mount-point',
+        {},
+        {
+          mount: {
+            $type: 't.mount.mongo',
+            uri: 'mongodb://admin:s3cret@host/x',
+            db: 'mydb',
+            collection: 'data',
+          },
+        },
+      ),
+    );
 
     const { artifactDir, manifest } = await backupInstance(rootJson, out, silent);
 
@@ -194,11 +252,15 @@ describe('instance backup/restore (gk8.9)', () => {
   });
 
   it('same dir mounted twice is copied once', async () => {
-    await writeFile(rootJson, JSON.stringify({
-      $path: '/', $type: 'root',
-      '#a': { $type: 't.mount.fs', root: workDir },
-      '#b': { $type: 't.mount.fs', root: workDir },
-    }));
+    await writeFile(
+      rootJson,
+      JSON.stringify({
+        $path: '/',
+        $type: 'root',
+        '#a': { $type: 't.mount.fs', root: workDir },
+        '#b': { $type: 't.mount.fs', root: workDir },
+      }),
+    );
 
     const { manifest } = await backupInstance(rootJson, out, silent);
     assert.equal(manifest.dirs.length, 1);
@@ -206,7 +268,10 @@ describe('instance backup/restore (gk8.9)', () => {
 
   it('backup of a corrupted source fails loudly', async () => {
     await writeFile(join(workDir, 'broken.json'), '{ not json');
-    await assert.rejects(() => backupInstance(rootJson, out, silent), (e: Error) => e instanceof Error);
+    await assert.rejects(
+      () => backupInstance(rootJson, out, silent),
+      (e: Error) => e instanceof Error,
+    );
   });
 
   it('config with no fs mounts → config-only artifact with a warning', async () => {
@@ -223,7 +288,10 @@ describe('instance backup/restore (gk8.9)', () => {
     const victim = join(dir0, 'app', 'config.json');
     const original = await readFile(victim, 'utf-8');
     await writeFile(victim, '{ broken');
-    await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'CORRUPT_NODE');
+    await assert.rejects(
+      () => verifyArtifact(artifactDir, silent),
+      (e: BackupError) => e.code === 'CORRUPT_NODE',
+    );
     await writeFile(victim, original);
 
     const mPath = join(artifactDir, 'manifest.json');
@@ -231,15 +299,24 @@ describe('instance backup/restore (gk8.9)', () => {
     const tampered = JSON.parse(mRaw);
     tampered.dirs[0].nodes += 1;
     await writeFile(mPath, JSON.stringify(tampered));
-    await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'COUNT_MISMATCH');
+    await assert.rejects(
+      () => verifyArtifact(artifactDir, silent),
+      (e: BackupError) => e.code === 'COUNT_MISMATCH',
+    );
     await writeFile(mPath, mRaw);
 
     await writeFile(join(dir0, DATA_VERSION_FILE), `${SUPPORTED_DATA_VERSION + 1}\n`);
-    await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'VERSION_AHEAD');
+    await assert.rejects(
+      () => verifyArtifact(artifactDir, silent),
+      (e: BackupError) => e.code === 'VERSION_AHEAD',
+    );
     await writeFile(join(dir0, DATA_VERSION_FILE), `${SUPPORTED_DATA_VERSION}\n`);
 
     await rm(mPath);
-    await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'NOT_A_BACKUP');
+    await assert.rejects(
+      () => verifyArtifact(artifactDir, silent),
+      (e: BackupError) => e.code === 'NOT_A_BACKUP',
+    );
   });
 
   it('restores into empty directories without permission to remove them', async () => {
@@ -252,7 +329,8 @@ describe('instance backup/restore (gk8.9)', () => {
     await chmod(parent, 0o555);
     try {
       await restoreArtifact(artifactDir, {}, silent);
-      const base = await jsonFixture(baseDir), work = await jsonFixture(workDir);
+      const base = await jsonFixture(baseDir),
+        work = await jsonFixture(workDir);
       assert.equal((await base.get('/app/config'))?.theme, 'dark');
       assert.equal((await work.get('/notes'))?.body, 'hello');
       await verifyArtifact(artifactDir, silent);
@@ -267,7 +345,10 @@ describe('instance backup/restore (gk8.9)', () => {
     const work = await jsonFixture(workDir);
     await work.set(createNode('/newer', 'dir', { v: 'post-backup' }));
 
-    await assert.rejects(() => restoreArtifact(artifactDir, {}, silent), (e: BackupError) => e.code === 'TARGET_NOT_EMPTY');
+    await assert.rejects(
+      () => restoreArtifact(artifactDir, {}, silent),
+      (e: BackupError) => e.code === 'TARGET_NOT_EMPTY',
+    );
 
     await restoreArtifact(artifactDir, { replace: true }, silent);
 
@@ -309,7 +390,10 @@ describe('instance backup/restore (gk8.9)', () => {
     const t = await jsonFixture(relWork);
     await t.set(createNode('/x', 'dir', { ok: true }));
     const relRoot = join(tmp, 'rel-root.json');
-    await writeFile(relRoot, JSON.stringify({ $path: '/', $type: 'root', '#m': { $type: 't.mount.fs', root: relWork } }));
+    await writeFile(
+      relRoot,
+      JSON.stringify({ $path: '/', $type: 'root', '#m': { $type: 't.mount.fs', root: relWork } }),
+    );
 
     const { artifactDir } = await backupInstance(relRoot, out, silent);
     const into = join(tmp, 'elsewhere');

@@ -32,7 +32,8 @@ describe('getComponent', () => {
 
   it('returns named-key component when types differ', () => {
     const node: NodeData = {
-      $path: '/a', $type: 'dir',
+      $path: '/a',
+      $type: 'dir',
       '#meta': { $type: 'test.meta', title: 'Hello', description: 'world' },
     };
     const comp = getComponent(node, TestMeta);
@@ -44,7 +45,8 @@ describe('getComponent', () => {
   it('prefers node-level over named key when both have same $type', () => {
     // This is the "wrong data shape" scenario — node-level wins, named key is ignored
     const node: NodeData = {
-      $path: '/a', $type: 'test.item',
+      $path: '/a',
+      $type: 'test.item',
       '#item': { $type: 'test.item', name: 'from-key', quantity: 99 },
     };
     const comp = getComponent(node, TestItem);
@@ -72,7 +74,8 @@ describe('setComponent', () => {
 
   it('updates named-key component', () => {
     const node: NodeData = {
-      $path: '/a', $type: 'dir',
+      $path: '/a',
+      $type: 'dir',
       '#meta': { $type: 'test.meta', title: 'old', description: 'old' },
     };
     setComponent(node, TestMeta, { title: 'new' });
@@ -133,6 +136,9 @@ describe('newComponent', () => {
 
 describe('getCtx', () => {
   it('throws when called outside action context', () => {
-    assert.throws(() => getCtx(), (e: Error) => e.message.includes('outside action context'));
+    assert.throws(
+      () => getCtx(),
+      (e: Error) => e.message.includes('outside action context'),
+    );
   });
 });

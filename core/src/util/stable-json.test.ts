@@ -4,7 +4,10 @@ import { stableJson } from './stable-json';
 
 describe('stableJson', () => {
   it('orders keys by code unit, independent of locale collation', () => {
-    assert.equal(stableJson({ a: 1, B: 2, _: 3, Z: { y: 1, X: 2 } }), '{"B":2,"Z":{"X":2,"y":1},"_":3,"a":1}');
+    assert.equal(
+      stableJson({ a: 1, B: 2, _: 3, Z: { y: 1, X: 2 } }),
+      '{"B":2,"Z":{"X":2,"y":1},"_":3,"a":1}',
+    );
   });
 
   it('keys a collation ranks equal still order by content, not construction', () => {

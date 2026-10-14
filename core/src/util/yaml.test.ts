@@ -17,7 +17,12 @@ describe('parseYaml — scalars', () => {
   });
 
   it('parses numbers', () => {
-    assert.deepEqual(parseYaml('i: 42\nf: 3.14\nn: -5\ne: 1e3'), { i: 42, f: 3.14, n: -5, e: 1000 });
+    assert.deepEqual(parseYaml('i: 42\nf: 3.14\nn: -5\ne: 1e3'), {
+      i: 42,
+      f: 3.14,
+      n: -5,
+      e: 1000,
+    });
   });
 
   it('parses bare strings', () => {
@@ -25,10 +30,10 @@ describe('parseYaml — scalars', () => {
   });
 
   it('parses quoted strings — preserves leading colons and special chars', () => {
-    assert.deepEqual(
-      parseYaml('a: "hello: world"\nb: \'it\\\'s ok\''),
-      { a: 'hello: world', b: "it's ok" },
-    );
+    assert.deepEqual(parseYaml("a: \"hello: world\"\nb: 'it\\'s ok'"), {
+      a: 'hello: world',
+      b: "it's ok",
+    });
   });
 
   it('value containing colon-not-followed-by-space stays in value', () => {
@@ -39,7 +44,9 @@ describe('parseYaml — scalars', () => {
 
 describe('parseYaml — arrays', () => {
   it('flow array of strings', () => {
-    assert.deepEqual(parseYaml('tags: [intro, overview, api]'), { tags: ['intro', 'overview', 'api'] });
+    assert.deepEqual(parseYaml('tags: [intro, overview, api]'), {
+      tags: ['intro', 'overview', 'api'],
+    });
   });
 
   it('flow array empty', () => {

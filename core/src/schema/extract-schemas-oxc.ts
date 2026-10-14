@@ -8,7 +8,13 @@ import { KernelError } from '#errors';
 import { assertSafeSiftQuery } from '#kernel/expr';
 import { assertPost } from '#kernel/post';
 import { DEFAULT_LIMITS, type Post, type Where } from '#kernel/types';
-import type { ActionKind, MethodArgSchema, MethodSchema, PropertySchema, TypeSchema } from '#schema/types';
+import type {
+  ActionKind,
+  MethodArgSchema,
+  MethodSchema,
+  PropertySchema,
+  TypeSchema,
+} from '#schema/types';
 
 interface ComponentEntry {
   typeName: string;
@@ -50,18 +56,36 @@ export class SchemaParseError extends Error {
 // Module-specific tags can use the `@x-foo` escape (Phase 1.2).
 const KNOWN_TAGS = new Set([
   // identity / docs
-  'title', 'description', 'deprecated', 'internal', 'example', 'see',
+  'title',
+  'description',
+  'deprecated',
+  'internal',
+  'example',
+  'see',
   // schema annotations
-  'format', 'refType', 'hidden', 'opaque', 'dangerous',
+  'format',
+  'refType',
+  'hidden',
+  'opaque',
+  'dangerous',
   // method kind
-  'read', 'write', 'setuid', 'io',
+  'read',
+  'write',
+  'setuid',
+  'io',
   // dataflow contract
-  'pre', 'post',
+  'pre',
+  'post',
   // type identity and evolution
-  'version', 'actionsOnly', 'alias',
+  'version',
+  'actionsOnly',
+  'alias',
   // standard JSDoc — @param/@returns/@throws allowed but stripped before return
   // (positional signature docs, not schema metadata); @default is kept
-  'param', 'returns', 'throws', 'default',
+  'param',
+  'returns',
+  'throws',
+  'default',
 ]);
 
 // C34: @param/@returns/@throws describe the TS signature, which is already
@@ -69,7 +93,17 @@ const KNOWN_TAGS = new Set([
 const SIGNATURE_TAGS = new Set(['param', 'returns', 'throws']);
 
 // Tags the extractor reads into typed schema fields; every other known tag is an annotation carried as written.
-const INTERPRETED_TAGS = new Set(['read', 'write', 'setuid', 'io', 'pre', 'post', 'version', 'actionsOnly', 'alias']);
+const INTERPRETED_TAGS = new Set([
+  'read',
+  'write',
+  'setuid',
+  'io',
+  'pre',
+  'post',
+  'version',
+  'actionsOnly',
+  'alias',
+]);
 
 // A JSON value may span lines: it runs to the next tag line.
 const JSON_TAGS = new Set(['pre', 'post']);
@@ -169,7 +203,8 @@ function interpretTags(tags: Map<string, string[]>): Omit<ParsedJSDoc, 'annotati
 
   for (const flag of FLAG_TAGS) {
     const values = tags.get(flag);
-    if (values?.some(Boolean)) throw new JSDocError(`@${flag} takes no value, got: ${values.join(' ')}`);
+    if (values?.some(Boolean))
+      throw new JSDocError(`@${flag} takes no value, got: ${values.join(' ')}`);
   }
 
   const kinds = ACTION_KINDS.filter((kind) => tags.has(kind));
@@ -218,7 +253,8 @@ function single(tags: Map<string, string[]>, name: string): string | undefined {
 
 function typeNames(names: string[]): string[] {
   if (!names.length) throw new JSDocError('@alias takes the earlier type names');
-  if (new Set(names).size < names.length) throw new JSDocError(`@alias repeats a name: ${names.join(' ')}`);
+  if (new Set(names).size < names.length)
+    throw new JSDocError(`@alias repeats a name: ${names.join(' ')}`);
 
   for (const name of names) {
     try {
@@ -236,7 +272,9 @@ function jsonTag<T>(tag: string, text: string, check: (value: unknown) => T): T 
   try {
     value = JSON.parse(text);
   } catch (e) {
-    throw new JSDocError(`@${tag} takes JSON — a list of field names is not one: ${text}`, { cause: e });
+    throw new JSDocError(`@${tag} takes JSON — a list of field names is not one: ${text}`, {
+      cause: e,
+    });
   }
 
   try {
@@ -257,7 +295,11 @@ function parseFileJSDoc(raw: string, file: string): ParsedJSDoc {
   }
 }
 
-function buildJSDocMap(comments: Comment[], source: string, file: string): Map<number, ParsedJSDoc> {
+function buildJSDocMap(
+  comments: Comment[],
+  source: string,
+  file: string,
+): Map<number, ParsedJSDoc> {
   const map = new Map<number, ParsedJSDoc>();
   for (const c of comments) {
     if (c.type !== 'Block' || !c.value.startsWith('*')) continue;
@@ -303,14 +345,26 @@ type InterpretedField = (typeof INTERPRETED_FIELDS)[number];
 const tagOf = (field: InterpretedField): string =>
   field === 'kind' ? '@read/@write/@setuid' : field === 'aliases' ? '@alias' : `@${field}`;
 
-function assertNoTags(doc: ParsedJSDoc | undefined, fields: readonly InterpretedField[], where: string, file: string): void {
+function assertNoTags(
+  doc: ParsedJSDoc | undefined,
+  fields: readonly InterpretedField[],
+  where: string,
+  file: string,
+): void {
   const found = fields.filter((field) => doc?.[field] !== undefined);
   if (found.length) {
-    throw new SchemaParseError(`[schema/oxc] ${file}: ${where} cannot carry ${found.map(tagOf).join(', ')}`, file);
+    throw new SchemaParseError(
+      `[schema/oxc] ${file}: ${where} cannot carry ${found.map(tagOf).join(', ')}`,
+      file,
+    );
   }
 }
 
-function fieldAnnotations(docs: FileDocs, pos: number, where: string): Record<string, string> | undefined {
+function fieldAnnotations(
+  docs: FileDocs,
+  pos: number,
+  where: string,
+): Record<string, string> | undefined {
   const doc = docs.at.get(pos);
   assertNoTags(doc, INTERPRETED_FIELDS, where, docs.file);
   return doc?.annotations;
@@ -491,11 +545,16 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): Property
     case 'TSTypeLiteral': {
       const properties: Record<string, PropertySchema> = {};
       const required: string[] = [];
-      const docs = ctx.docsByFile && ctx.currentFile ? docsOf(ctx.docsByFile, ctx.currentFile) : undefined;
+      const docs =
+        ctx.docsByFile && ctx.currentFile ? docsOf(ctx.docsByFile, ctx.currentFile) : undefined;
       for (const m of node.members ?? []) {
         if (m.type === 'TSPropertySignature' && m.key?.name) {
           properties[m.key.name] = typeToSchema(m.typeAnnotation?.typeAnnotation, ctx);
-          if (docs) Object.assign(properties[m.key.name], fieldAnnotations(docs, m.start, `field ${m.key.name}`));
+          if (docs)
+            Object.assign(
+              properties[m.key.name],
+              fieldAnnotations(docs, m.start, `field ${m.key.name}`),
+            );
           if (!m.optional) required.push(m.key.name);
         }
       }
@@ -609,7 +668,9 @@ function evalInit(node: N | null | undefined, ctx: SchemaCtx = {}): unknown {
 // Sort object keys to keep JSON output stable across fs.readdir orders
 function sortKeys<T>(obj: Record<string, T>): Record<string, T> {
   return Object.fromEntries(
-    Object.keys(obj).sort((a, b) => a.localeCompare(b)).map((k) => [k, obj[k]]),
+    Object.keys(obj)
+      .sort((a, b) => a.localeCompare(b))
+      .map((k) => [k, obj[k]]),
   );
 }
 
@@ -640,7 +701,12 @@ function findRegistrations(ast: N, fileName: string): ComponentEntry[] {
         typeof typeArg.value === 'string' &&
         classArg?.type === 'Identifier'
       )
-        entries.push({ typeName: typeArg.value, className: classArg.name, fileName, needs: declaredNeeds(optsArg) });
+        entries.push({
+          typeName: typeArg.value,
+          className: classArg.name,
+          fileName,
+          needs: declaredNeeds(optsArg),
+        });
     }
   });
   return entries;
@@ -684,7 +750,7 @@ function findClasses(ast: N): Map<string, N> {
 
   for (const [name, node] of classes) {
     const members: N[] = node.body.body;
-    const implemented = new Set(members.map(member => member.key?.name));
+    const implemented = new Set(members.map((member) => member.key?.name));
     for (const member of declarations.get(name) ?? []) {
       if (member.type === 'TSMethodSignature' && !implemented.has(member.key?.name)) {
         members.push(member);
@@ -714,10 +780,7 @@ function findTypeAliases(ast: N): Map<string, N> {
 
 // Cache: dir → { dir, imports } walked to nearest package.json with an imports field.
 // Null means "no imports field found above this dir".
-const packageImportsCache = new Map<
-  string,
-  { dir: string; imports: Record<string, any> } | null
->();
+const packageImportsCache = new Map<string, { dir: string; imports: Record<string, any> } | null>();
 
 async function findPackageImports(
   fromFile: string,
@@ -793,7 +856,7 @@ async function resolveImportSource(fromFile: string, source: string): Promise<st
     if (!pkg) return null;
     for (const [pattern, target] of Object.entries(pkg.imports)) {
       const targetPath =
-        typeof target === 'string' ? target : target?.development ?? target?.default;
+        typeof target === 'string' ? target : (target?.development ?? target?.default);
       if (typeof targetPath !== 'string') continue;
 
       if (pattern === source) {
@@ -852,12 +915,18 @@ function findEnums(ast: N, fileName: string): Map<string, N> {
   return enums;
 }
 
-function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJSDoc>): Map<string, ExternalAction[]> {
+function findExternalActions(
+  ast: N,
+  fileName: string,
+  docs: Map<number, ParsedJSDoc>,
+): Map<string, ExternalAction[]> {
   const byType = new Map<string, ExternalAction[]>();
   const functions = new Map<string, N>();
   for (const statement of ast.body) {
-    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
-    if (declaration?.type === 'FunctionDeclaration' && declaration.id) functions.set(declaration.id.name, declaration);
+    const declaration =
+      statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    if (declaration?.type === 'FunctionDeclaration' && declaration.id)
+      functions.set(declaration.id.name, declaration);
   }
   walk(ast, (node) => {
     if (
@@ -880,7 +949,12 @@ function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJ
 
         // A register()ed action's schema carries no kind or contract, so its JSDoc must not declare one. register()
         // returns nothing, so the call starts its statement and the statement's JSDoc is keyed at the call.
-        assertNoTags(docs.get(node.start), INTERPRETED_FIELDS, `${typeArg.value}.${actionName}`, fileName);
+        assertNoTags(
+          docs.get(node.start),
+          INTERPRETED_FIELDS,
+          `${typeArg.value}.${actionName}`,
+          fileName,
+        );
 
         if (!byType.has(typeArg.value)) byType.set(typeArg.value, []);
         const list = byType.get(typeArg.value)!;
@@ -889,14 +963,21 @@ function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJ
         const action: ExternalAction = { name: actionName, fileName };
 
         // Extract handler param types (skip 1st ctx param)
-        const handler = handlerArg?.type === 'Identifier' ? functions.get(handlerArg.name) : handlerArg;
+        const handler =
+          handlerArg?.type === 'Identifier' ? functions.get(handlerArg.name) : handlerArg;
         if (
           handler?.type === 'ArrowFunctionExpression' ||
           handler?.type === 'FunctionExpression' ||
           handler?.type === 'FunctionDeclaration'
         ) {
           const params: N[] = handler.params ?? [];
-          const args = actionArguments(params.slice(1), 0, {}, `${typeArg.value}.${actionName}`, fileName);
+          const args = actionArguments(
+            params.slice(1),
+            0,
+            {},
+            `${typeArg.value}.${actionName}`,
+            fileName,
+          );
           if (args.length) action.arguments = args;
         }
 
@@ -911,9 +992,18 @@ function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJ
 
 // TWP `act` carries one args value, so an action declares at most one data parameter; a rest parameter would take
 // any number of them. `injected` counts the parameters the runtime passes after the args, which are no caller data.
-function actionArguments(params: N[], injected: number, ctx: SchemaCtx, where: string, file: string): MethodArgSchema[] {
+function actionArguments(
+  params: N[],
+  injected: number,
+  ctx: SchemaCtx,
+  where: string,
+  file: string,
+): MethodArgSchema[] {
   if (params.some((param) => param.type === 'RestElement')) {
-    throw new SchemaParseError(`[schema/oxc] ${file}: ${where} declares a rest parameter; an action takes one args value`, file);
+    throw new SchemaParseError(
+      `[schema/oxc] ${file}: ${where} declares a rest parameter; an action takes one args value`,
+      file,
+    );
   }
   if (params.length > 1 + injected) {
     throw new SchemaParseError(
@@ -995,7 +1085,10 @@ function generateClassSchema(
       );
     }
     if (doc?.post && doc.kind === 'read') {
-      throw new SchemaParseError(`[schema/oxc] ${currentFile}: ${where} is @read and writes nothing, so it declares no @post`, currentFile);
+      throw new SchemaParseError(
+        `[schema/oxc] ${currentFile}: ${where} is @read and writes nothing, so it declares no @post`,
+        currentFile,
+      );
     }
 
     // registerType calls a class method as (args, needs); without declared needs the second argument is an empty
@@ -1044,7 +1137,12 @@ function generateClassSchema(
       const ta = member.typeAnnotation?.typeAnnotation;
       const refType =
         ta?.type === 'TSTypeReference' && ta.typeName?.name
-          ? resolveRegisteredClassType(ta.typeName.name, currentFile, classTypesByFile, importsByFile)
+          ? resolveRegisteredClassType(
+              ta.typeName.name,
+              currentFile,
+              classTypesByFile,
+              importsByFile,
+            )
           : undefined;
 
       // Registered component class → path ref to that registered type.
@@ -1058,7 +1156,10 @@ function generateClassSchema(
         properties[name] = ta ? typeToSchema(ta, ctx) : typeFromInit(member.value);
       }
 
-      Object.assign(properties[name], fieldAnnotations(fileDocs, member.start, `${className}.${name}`));
+      Object.assign(
+        properties[name],
+        fieldAnnotations(fileDocs, member.start, `${className}.${name}`),
+      );
 
       // `default` and `required` are independent.
       // `default` is the initial value forms (and other writers) seed when the user
@@ -1074,8 +1175,11 @@ function generateClassSchema(
       if (!member.optional && !hasUndef) required.push(name);
     }
 
-    if ((member.type === 'MethodDefinition' || member.type === 'TSMethodSignature')
-      && member.key?.name && member.kind === 'method') {
+    if (
+      (member.type === 'MethodDefinition' || member.type === 'TSMethodSignature') &&
+      member.key?.name &&
+      member.kind === 'method'
+    ) {
       const fn = member.type === 'MethodDefinition' ? member.value : member;
       const m = buildMethodFromFn(member.key.name, fn, member.start);
       if (m) methods[member.key.name] = m;
@@ -1168,8 +1272,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
     for (const e of findRegistrations(ast as N, file)) allEntries.push(e);
 
-    for (const [name, node] of findClasses(ast as N))
-      allClasses.set(name + '\0' + file, node);
+    for (const [name, node] of findClasses(ast as N)) allClasses.set(name + '\0' + file, node);
 
     for (const [typeName, actions] of findExternalActions(ast as N, file, docs)) {
       const existing = allExternalActions.get(typeName) ?? [];
@@ -1199,7 +1302,10 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
       importsByFile,
     );
     if (body.aliases?.includes(entry.typeName)) {
-      throw new SchemaParseError(`[schema/oxc] ${entry.fileName}: ${entry.typeName} names itself in @alias`, entry.fileName);
+      throw new SchemaParseError(
+        `[schema/oxc] ${entry.fileName}: ${entry.typeName} names itself in @alias`,
+        entry.fileName,
+      );
     }
     generated.add(entry.typeName);
 

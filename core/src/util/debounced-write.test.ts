@@ -5,7 +5,10 @@ import { debouncedWrite } from './debounced-write';
 function deferred() {
   let resolve!: () => void;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
@@ -14,7 +17,14 @@ describe('debouncedWrite', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const written = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; written.resolve(); }, 50, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+        written.resolve();
+      },
+      50,
+      'test',
+    );
 
     dw.trigger();
     dw.trigger();
@@ -30,7 +40,15 @@ describe('debouncedWrite', () => {
     const started = deferred();
     const finish = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; started.resolve(); await finish.promise; }, 20, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+        started.resolve();
+        await finish.promise;
+      },
+      20,
+      'test',
+    );
 
     dw.trigger();
     t.mock.timers.tick(20);
@@ -45,7 +63,13 @@ describe('debouncedWrite', () => {
   it('flush rejects with the write failure', async (t) => {
     t.mock.method(console, 'error', () => {});
     const failure = new Error('write failed');
-    const dw = debouncedWrite(async () => { throw failure; }, 10, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        throw failure;
+      },
+      10,
+      'test',
+    );
 
     await assert.rejects(dw.flush(), (error) => error === failure);
   });
@@ -56,7 +80,14 @@ describe('debouncedWrite', () => {
     const started = deferred();
     const finish = deferred();
     const failure = new Error('write failed');
-    const dw = debouncedWrite(async () => { started.resolve(); await finish.promise; }, 20, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        started.resolve();
+        await finish.promise;
+      },
+      20,
+      'test',
+    );
 
     dw.trigger();
     t.mock.timers.tick(20);
@@ -69,7 +100,13 @@ describe('debouncedWrite', () => {
   it('cancel prevents a pending write', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 50, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+      },
+      50,
+      'test',
+    );
 
     dw.trigger();
     dw.cancel();
@@ -82,7 +119,13 @@ describe('debouncedWrite', () => {
   it('flush executes the pending write immediately', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 5_000, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+      },
+      5_000,
+      'test',
+    );
 
     dw.trigger();
     await dw.flush();
@@ -94,7 +137,13 @@ describe('debouncedWrite', () => {
 
   it('flush writes the final state when no timer is pending', async () => {
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 50, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+      },
+      50,
+      'test',
+    );
 
     await dw.flush();
 
@@ -105,7 +154,14 @@ describe('debouncedWrite', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const written = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; written.resolve(); }, 30, 'test');
+    const dw = debouncedWrite(
+      async () => {
+        writes++;
+        written.resolve();
+      },
+      30,
+      'test',
+    );
 
     dw.trigger();
     dw.cancel();

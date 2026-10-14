@@ -1,177 +1,220 @@
-import { createLaneCache, type LaneCache } from '#client/lane-cache'
-export type { LaneMember } from '#client/lane-cache'
-import { KernelError } from '#errors'
-import { comparePositions } from '#kernel/position'
-import { isReadResult } from '#protocol/twp'
-import { createChunkChannel } from '#util/chunk-channel'
-import type { ActRequest, CommitRequest, Connection, Credential, Frame, OpId, Outcome, Pending, ReadResult, Request, Selector, SubSelector } from '#kernel/types'
+import { createLaneCache, type LaneCache } from '#client/lane-cache';
+export type { LaneMember } from '#client/lane-cache';
+import { KernelError } from '#errors';
+import { comparePositions } from '#kernel/position';
+import { isReadResult } from '#protocol/twp';
+import { createChunkChannel } from '#util/chunk-channel';
+import type {
+  ActRequest,
+  CommitRequest,
+  Connection,
+  Credential,
+  Frame,
+  OpId,
+  Outcome,
+  Pending,
+  ReadResult,
+  Request,
+  Selector,
+  SubSelector,
+} from '#kernel/types';
 
 export interface NativeClientOptions {
   /** Borrows one reconnect cache until close; its previous client must have ended. */
-  readonly cache?: LaneCache
+  readonly cache?: LaneCache;
   /** Binds retained copies to the same explicit identity used by the transport. */
-  readonly credential?: Credential
-  readonly maxRequests?: number
-  readonly close?: () => void
-  readonly onError?: (error: KernelError) => void
+  readonly credential?: Credential;
+  readonly maxRequests?: number;
+  readonly close?: () => void;
+  readonly onError?: (error: KernelError) => void;
 }
-export interface NodeSubscription { readonly id: string; readonly ready: Promise<void>; close(): void }
+export interface NodeSubscription {
+  readonly id: string;
+  readonly ready: Promise<void>;
+  close(): void;
+}
 interface Waiting {
-  readonly resolve: (outcome: Outcome) => void
-  readonly reject: (error: KernelError) => void
-  readonly chunks?: ReturnType<typeof createChunkChannel>
-  cancelled?: boolean
+  readonly resolve: (outcome: Outcome) => void;
+  readonly reject: (error: KernelError) => void;
+  readonly chunks?: ReturnType<typeof createChunkChannel>;
+  cancelled?: boolean;
 }
-interface Watching { readonly resolve: () => void; readonly reject: (error: KernelError) => void; readonly changed: () => void }
+interface Watching {
+  readonly resolve: () => void;
+  readonly reject: (error: KernelError) => void;
+  readonly changed: () => void;
+}
 
 /** Creates a TWP client and attaches its optional caller-owned reconnect cache. */
 export function createTwpClient(connection: Connection, options: NativeClientOptions = {}) {
   const cache = options.cache ?? createLaneCache(),
     waiting = new Map<string, Waiting>(),
-    watching = new Map<string, Watching>()
-  cache.attach(options.credential)
-  const maxRequests = options.maxRequests ?? 8
-  const controller = new AbortController()
-  let sequence = 0, subSequence = 0, welcome: Extract<Frame, { t: 'welcome' }> | undefined, failure: KernelError | undefined
-  let intake: string | undefined
-  let readyResolve: (frame: Extract<Frame, { t: 'welcome' }>) => void = () => {}, readyReject: (error: KernelError) => void = () => {}
-  const ready = new Promise<Extract<Frame, { t: 'welcome' }>>((resolve, reject) => { readyResolve = resolve; readyReject = reject })
+    watching = new Map<string, Watching>();
+  cache.attach(options.credential);
+  const maxRequests = options.maxRequests ?? 8;
+  const controller = new AbortController();
+  let sequence = 0,
+    subSequence = 0,
+    welcome: Extract<Frame, { t: 'welcome' }> | undefined,
+    failure: KernelError | undefined;
+  let intake: string | undefined;
+  let readyResolve: (frame: Extract<Frame, { t: 'welcome' }>) => void = () => {},
+    readyReject: (error: KernelError) => void = () => {};
+  const ready = new Promise<Extract<Frame, { t: 'welcome' }>>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
   function close(reason?: KernelError): void {
-    if (failure !== undefined) return
-    const error = reason ?? new KernelError('CANCELLED', 'Client closed')
-    failure = error
+    if (failure !== undefined) return;
+    const error = reason ?? new KernelError('CANCELLED', 'Client closed');
+    failure = error;
     // Rejection callbacks may immediately attach the borrowed cache to a replacement transport.
-    cache.detach(options.cache !== undefined)
-    if (options.cache === undefined) cache.clear()
-    readyReject(error)
-    for (const request of waiting.values()) { request.chunks?.end(error); request.reject(error) }
-    for (const sub of watching.values()) sub.reject(error)
-    waiting.clear()
-    watching.clear()
-    controller.abort(error)
-    options.close?.()
-    if (reason !== undefined) options.onError?.(error)
+    cache.detach(options.cache !== undefined);
+    if (options.cache === undefined) cache.clear();
+    readyReject(error);
+    for (const request of waiting.values()) {
+      request.chunks?.end(error);
+      request.reject(error);
+    }
+    for (const sub of watching.values()) sub.reject(error);
+    waiting.clear();
+    watching.clear();
+    controller.abort(error);
+    options.close?.();
+    if (reason !== undefined) options.onError?.(error);
   }
   function active(): void {
-    if (failure !== undefined) throw failure
-    if (welcome === undefined) throw new KernelError('UNAVAILABLE', 'Client handshake is pending')
+    if (failure !== undefined) throw failure;
+    if (welcome === undefined) throw new KernelError('UNAVAILABLE', 'Client handshake is pending');
   }
   function key(): OpId {
-    active()
-    const current = welcome
-    if (current === undefined || intake === undefined) throw new KernelError('UNAVAILABLE', 'Client handshake is pending')
-    return { epoch: intake, time: Date.now(), nonce: crypto.randomUUID() }
+    active();
+    const current = welcome;
+    if (current === undefined || intake === undefined)
+      throw new KernelError('UNAVAILABLE', 'Client handshake is pending');
+    return { epoch: intake, time: Date.now(), nonce: crypto.randomUUID() };
   }
   /** Cancels the selected consumer while retaining its request until the canonical answer arrives. */
   function cancel(id: string): void {
-    active()
-    const pending = waiting.get(id)
+    active();
+    const pending = waiting.get(id);
     if (pending !== undefined) {
-      pending.cancelled = true
-      pending.chunks?.end(new KernelError('CANCELLED', 'Request cancelled'))
+      pending.cancelled = true;
+      pending.chunks?.end(new KernelError('CANCELLED', 'Request cancelled'));
     }
-    connection.send({ t: 'cancel', req: id })
+    connection.send({ t: 'cancel', req: id });
   }
 
   /** Creates a correlated request with an optional single-consumer piece stream. */
   function request(build: (req: string) => Request, pieces = false, signal?: AbortSignal): Pending {
-    signal?.throwIfAborted()
-    active()
+    signal?.throwIfAborted();
+    active();
     if (waiting.size >= maxRequests)
-      throw new KernelError('BUDGET', 'Too many unfinished client requests')
-    const id = String(++sequence)
-    const chunks = pieces ? createChunkChannel(() => cancel(id)) : undefined
+      throw new KernelError('BUDGET', 'Too many unfinished client requests');
+    const id = String(++sequence);
+    const chunks = pieces ? createChunkChannel(() => cancel(id)) : undefined;
     const outcome = new Promise<Outcome>((resolve, reject) => {
-      waiting.set(id, { resolve, reject, chunks })
+      waiting.set(id, { resolve, reject, chunks });
       try {
-        connection.send(build(id))
+        connection.send(build(id));
       } catch (error) {
-        waiting.delete(id)
-        chunks?.end(error)
-        reject(error)
+        waiting.delete(id);
+        chunks?.end(error);
+        reject(error);
       }
-    })
-    const abort = () => { if (failure === undefined) cancel(id) }
-    signal?.addEventListener('abort', abort, { once: true })
-    const settled = outcome.finally(() => signal?.removeEventListener('abort', abort))
+    });
+    const abort = () => {
+      if (failure === undefined) cancel(id);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    const settled = outcome.finally(() => signal?.removeEventListener('abort', abort));
     // A pieces consumer may see the refusal before awaiting the unchanged outcome promise.
-    if (pieces) void settled.catch(() => {})
-    return { id, outcome: settled, chunks: chunks?.chunks ?? (async function* () {})() }
+    if (pieces) void settled.catch(() => {});
+    return { id, outcome: settled, chunks: chunks?.chunks ?? (async function* () {})() };
   }
   /** Routes incoming frames to their owning request, subscription, or lane cache. */
   async function consume(): Promise<void> {
     try {
       for await (const frame of connection.frames) {
-        if (failure !== undefined) return
+        if (failure !== undefined) return;
         if (frame.t === 'welcome') {
-          if (welcome !== undefined) throw new KernelError('INVALID', 'Duplicate client handshake')
-          welcome = frame
-          intake = frame.intake
-          cache.apply(frame)
-          readyResolve(frame)
-          continue
+          if (welcome !== undefined) throw new KernelError('INVALID', 'Duplicate client handshake');
+          welcome = frame;
+          intake = frame.intake;
+          cache.apply(frame);
+          readyResolve(frame);
+          continue;
         }
         if (frame.t === 'fail') {
-          const error = new KernelError(frame.error.code, frame.error.message)
-          if (frame.req === undefined) throw error
-          const pending = waiting.get(frame.req)
-          if (pending === undefined) throw new KernelError('INVALID', 'Unknown failed request')
-          waiting.delete(frame.req)
-          cache.releaseProducer({ req: frame.req })
-          pending.chunks?.end(error)
-          pending.reject(error)
-          continue
+          const error = new KernelError(frame.error.code, frame.error.message);
+          if (frame.req === undefined) throw error;
+          const pending = waiting.get(frame.req);
+          if (pending === undefined) throw new KernelError('INVALID', 'Unknown failed request');
+          waiting.delete(frame.req);
+          cache.releaseProducer({ req: frame.req });
+          pending.chunks?.end(error);
+          pending.reject(error);
+          continue;
         }
-        active()
+        active();
         if (frame.t === 'done') {
-          const pending = waiting.get(frame.req)
-          if (pending === undefined) throw new KernelError('INVALID', 'Unknown completed request')
+          const pending = waiting.get(frame.req);
+          if (pending === undefined) throw new KernelError('INVALID', 'Unknown completed request');
           if (frame.pos !== undefined) {
-            const covered = cache.watermark(frame.pos.instance)
+            const covered = cache.watermark(frame.pos.instance);
             if (covered === undefined || comparePositions(covered, frame.pos) < 0)
-              throw new KernelError('INVALID', 'Mutation completed before its position frame')
+              throw new KernelError('INVALID', 'Mutation completed before its position frame');
           }
-          waiting.delete(frame.req)
-          cache.releaseProducer({ req: frame.req })
-          pending.chunks?.end()
-          pending.resolve({ pos: frame.pos, value: frame.value })
-          continue
+          waiting.delete(frame.req);
+          cache.releaseProducer({ req: frame.req });
+          pending.chunks?.end();
+          pending.resolve({ pos: frame.pos, value: frame.value });
+          continue;
         }
         if (frame.t === 'chunk') {
-          const pending = waiting.get(frame.req)
+          const pending = waiting.get(frame.req);
           if (pending === undefined || pending.chunks === undefined)
-            throw new KernelError('INVALID', 'Unknown streaming request')
+            throw new KernelError('INVALID', 'Unknown streaming request');
           // Late pieces of an explicitly cancelled request have no consumer; its final answer still does.
-          if (pending.cancelled) continue
+          if (pending.cancelled) continue;
           try {
-            await pending.chunks.deliver(frame.data, controller.signal)
+            await pending.chunks.deliver(frame.data, controller.signal);
           } catch (error) {
             if (!pending.cancelled || !(error instanceof KernelError && error.code === 'CANCELLED'))
-              throw error
+              throw error;
           }
-          continue
+          continue;
         }
         if (frame.t === 'pos' && frame.coverage !== true && frame.producer !== undefined) {
-          const producer = frame.producer
+          const producer = frame.producer;
           if ('req' in producer) {
-            if (!waiting.has(producer.req)) throw new KernelError('INVALID', 'Foreign position has no pending request')
+            if (!waiting.has(producer.req))
+              throw new KernelError('INVALID', 'Foreign position has no pending request');
           } else {
             if (!watching.has(producer.sub)) {
-              const issued = Number(producer.sub.slice(4))
-              if (!/^sub:[1-9][0-9]*$/.test(producer.sub) || !Number.isSafeInteger(issued) || issued > subSequence || frame.changes.length !== 0)
-                throw new KernelError('INVALID', 'Foreign position has no subscription owner')
-              continue
+              const issued = Number(producer.sub.slice(4));
+              if (
+                !/^sub:[1-9][0-9]*$/.test(producer.sub) ||
+                !Number.isSafeInteger(issued) ||
+                issued > subSequence ||
+                frame.changes.length !== 0
+              )
+                throw new KernelError('INVALID', 'Foreign position has no subscription owner');
+              continue;
             }
-            const current = cache.list(producer.sub)
-            if (current === undefined || producer.gen > current.gen) throw new KernelError('INVALID', 'Foreign position generation is unavailable')
+            const current = cache.list(producer.sub);
+            if (current === undefined || producer.gen > current.gen)
+              throw new KernelError('INVALID', 'Foreign position generation is unavailable');
             if (producer.gen < current.gen) {
-              if (frame.changes.length !== 0) throw new KernelError('INVALID', 'Obsolete producer contains data changes')
-              continue
+              if (frame.changes.length !== 0)
+                throw new KernelError('INVALID', 'Obsolete producer contains data changes');
+              continue;
             }
           }
         }
-        cache.apply(frame)
-        if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined) intake = frame.intake
+        cache.apply(frame);
+        if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined)
+          intake = frame.intake;
         if (
           (frame.t === 'snap' ||
             frame.t === 'result' ||
@@ -179,61 +222,110 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
             frame.t === 'end') &&
           !watching.has(frame.sub)
         )
-          cache.forget(frame.sub)
+          cache.forget(frame.sub);
         if (frame.t === 'end') {
-          const sub = watching.get(frame.sub)
-          watching.delete(frame.sub)
-          sub?.reject(new KernelError(frame.error.code, frame.error.message))
+          const sub = watching.get(frame.sub);
+          watching.delete(frame.sub);
+          sub?.reject(new KernelError(frame.error.code, frame.error.message));
         } else {
-          if (frame.t === 'snap') watching.get(frame.sub)?.resolve()
-          for (const sub of watching.values()) sub.changed()
+          if (frame.t === 'snap') watching.get(frame.sub)?.resolve();
+          for (const sub of watching.values()) sub.changed();
         }
       }
-      close(new KernelError('UNAVAILABLE', 'Lane disconnected'))
+      close(new KernelError('UNAVAILABLE', 'Lane disconnected'));
     } catch (error) {
-      if (!(error instanceof KernelError)) console.error(error)
+      if (!(error instanceof KernelError)) console.error(error);
       close(
         error instanceof KernelError
           ? error
           : new KernelError('UNAVAILABLE', 'Client transport failed'),
-      )
+      );
     }
   }
-  void consume()
-  return { ready, cache, key, failure: () => failure,
+  void consume();
+  return {
+    ready,
+    cache,
+    key,
+    failure: () => failure,
     read(selector: Selector, signal?: AbortSignal): Promise<ReadResult> {
-      return request(req => ({ t: 'read', req, selector }), false, signal).outcome.then(result => {
-        if (!isReadResult(result.value))
-          throw new KernelError('INVALID', 'Malformed wire read result')
-        return result.value
-      })
+      return request((req) => ({ t: 'read', req, selector }), false, signal).outcome.then(
+        (result) => {
+          if (!isReadResult(result.value))
+            throw new KernelError('INVALID', 'Malformed wire read result');
+          return result.value;
+        },
+      );
     },
-    commit(input: Omit<CommitRequest, 'opId'> & { readonly opId?: OpId }, signal?: AbortSignal): Pending {
-      const opId = input.opId ?? key()
-      return request(req => ({ t: 'commit', req, changes: input.changes, expect: input.expect, opId }), false, signal)
+    commit(
+      input: Omit<CommitRequest, 'opId'> & { readonly opId?: OpId },
+      signal?: AbortSignal,
+    ): Pending {
+      const opId = input.opId ?? key();
+      return request(
+        (req) => ({ t: 'commit', req, changes: input.changes, expect: input.expect, opId }),
+        false,
+        signal,
+      );
     },
     act(input: ActRequest, signal?: AbortSignal): Pending {
-      const opId = input.opId ?? key()
-      return request(req => ({ t: 'act', req, path: input.path, component: input.component, action: input.action,
-        args: input.args, anchor: input.anchor, pre: input.pre, opId }), true, signal)
+      const opId = input.opId ?? key();
+      return request(
+        (req) => ({
+          t: 'act',
+          req,
+          path: input.path,
+          component: input.component,
+          action: input.action,
+          args: input.args,
+          anchor: input.anchor,
+          pre: input.pre,
+          opId,
+        }),
+        true,
+        signal,
+      );
     },
-    sub(selector: SubSelector, changed: () => void, refused?: (error: KernelError) => void): NodeSubscription {
-      active()
-      const id = `sub:${++subSequence}`
+    sub(
+      selector: SubSelector,
+      changed: () => void,
+      refused?: (error: KernelError) => void,
+    ): NodeSubscription {
+      active();
+      const id = `sub:${++subSequence}`;
       const ready = new Promise<void>((resolve, reject) => {
-        watching.set(id, { resolve, reject(error) { reject(error); refused?.(error) }, changed })
-        try { connection.send({ t: 'sub', sub: id, selector }) }
-        catch (error) { watching.delete(id); reject(error) }
-      })
-      return { id, ready, close() {
-        const pending = watching.get(id)
-        if (pending !== undefined) {
-          watching.delete(id); cache.forget(id); pending.reject(new KernelError('CANCELLED', 'Subscription closed'))
-          if (failure === undefined) connection.send({ t: 'unsub', sub: id })
+        watching.set(id, {
+          resolve,
+          reject(error) {
+            reject(error);
+            refused?.(error);
+          },
+          changed,
+        });
+        try {
+          connection.send({ t: 'sub', sub: id, selector });
+        } catch (error) {
+          watching.delete(id);
+          reject(error);
         }
-      } }
+      });
+      return {
+        id,
+        ready,
+        close() {
+          const pending = watching.get(id);
+          if (pending !== undefined) {
+            watching.delete(id);
+            cache.forget(id);
+            pending.reject(new KernelError('CANCELLED', 'Subscription closed'));
+            if (failure === undefined) connection.send({ t: 'unsub', sub: id });
+          }
+        },
+      };
     },
-    cancel, close }
+    cancel,
+    close,
+  };
 }
 
-export type TwpClient = ReturnType<typeof createTwpClient>
+export type TwpClient = ReturnType<typeof createTwpClient>;

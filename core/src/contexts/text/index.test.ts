@@ -4,7 +4,9 @@ import { describe, it } from 'node:test';
 import { clientModules } from './index';
 
 function ownedText(type: string) {
-  const entry = clientModules[0].open.find(entry => entry.type === normalizeType(type) && entry.context === 'text');
+  const entry = clientModules[0].open.find(
+    (entry) => entry.type === normalizeType(type) && entry.context === 'text',
+  );
   assert.ok(entry);
   return entry.handler;
 }

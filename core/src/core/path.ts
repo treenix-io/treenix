@@ -53,7 +53,8 @@ export function isInsideRoot(root: string, target: string): boolean {
 
 /** Deepest path containing both a and b ('/x/a', '/x/b' → '/x'; disjoint → '/'). */
 export function commonAncestor(a: string, b: string): string {
-  const as = a.split('/'), bs = b.split('/');
+  const as = a.split('/'),
+    bs = b.split('/');
   const shared: string[] = [];
   for (let i = 1; i < as.length && i < bs.length && as[i] === bs[i]; i++) shared.push(as[i]);
   return shared.length ? '/' + shared.join('/') : '/';
@@ -65,13 +66,17 @@ export function commonAncestor(a: string, b: string): string {
 // kriz: should optimize: first check with one precompiled re, then if any suspected - full check
 // kriz: performance check. this func should be fast
 export function assertSafePath(path: string): void {
-  if (!path.startsWith('/')) throw new Error(`Invalid path: must start with /: ${JSON.stringify(path)}`);
+  if (!path.startsWith('/'))
+    throw new Error(`Invalid path: must start with /: ${JSON.stringify(path)}`);
   if (path.includes('\0')) throw new Error(`Invalid path: null byte`);
   if (path.includes('\\')) throw new Error(`Invalid path: backslash at ${JSON.stringify(path)}`);
-  if (/%[0-9a-f]{2}/i.test(path)) throw new Error(`Invalid path: percent-escape at ${JSON.stringify(path)}`);
-  if (/[?#]/.test(path)) throw new Error(`Invalid path: reserved URI delimiter (? or #) at ${JSON.stringify(path)}`);
+  if (/%[0-9a-f]{2}/i.test(path))
+    throw new Error(`Invalid path: percent-escape at ${JSON.stringify(path)}`);
+  if (/[?#]/.test(path))
+    throw new Error(`Invalid path: reserved URI delimiter (? or #) at ${JSON.stringify(path)}`);
   if (path.includes('//')) throw new Error(`Invalid path: double slash at ${JSON.stringify(path)}`);
-  if (path !== '/' && path.endsWith('/')) throw new Error(`Invalid path: trailing slash at ${JSON.stringify(path)}`);
+  if (path !== '/' && path.endsWith('/'))
+    throw new Error(`Invalid path: trailing slash at ${JSON.stringify(path)}`);
   const segments = path.split('/');
   for (const s of segments) {
     if (s === '..') throw new Error(`Invalid path: traversal`);

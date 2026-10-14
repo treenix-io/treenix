@@ -1,47 +1,62 @@
-import { randomBytes } from 'node:crypto'
-import { KernelError } from '#errors'
-import { tokenHash } from '#kernel/auth/crypto'
-import type { AuthAdmission } from '#kernel/auth-factory'
-import type { InstanceFoundationWithAuth } from '#kernel/instance'
-import type { NodeLane, NodeLaneCommand } from '#kernel/lane'
-export { networkAddress } from '#kernel/session-origin'
-import type { CacheClaim, Credential, Request } from '#kernel/types'
-
+import { randomBytes } from 'node:crypto';
+import { KernelError } from '#errors';
+import { tokenHash } from '#kernel/auth/crypto';
+import type { AuthAdmission } from '#kernel/auth-factory';
+import type { InstanceFoundationWithAuth } from '#kernel/instance';
+import type { NodeLane, NodeLaneCommand } from '#kernel/lane';
+export { networkAddress } from '#kernel/session-origin';
+import type { CacheClaim, Credential, Request } from '#kernel/types';
 
 interface ServedLane {
-  readonly id: string
-  readonly lane: NodeLane
-  readonly admission: AuthAdmission
-  readonly credentialHash: string
-  readonly origin: string
-  attached: boolean
-  close(reason?: KernelError): void
+  readonly id: string;
+  readonly lane: NodeLane;
+  readonly admission: AuthAdmission;
+  readonly credentialHash: string;
+  readonly origin: string;
+  attached: boolean;
+  close(reason?: KernelError): void;
 }
 
 function command(request: Request): NodeLaneCommand {
   switch (request.t) {
     case 'read':
-      return { ...request, selector: request.selector }
-    case 'sub': return request
+      return { ...request, selector: request.selector };
+    case 'sub':
+      return request;
     case 'commit':
-      if (request.expect?.selectors?.some(input => 'history' in input.selector)) throw new KernelError('INVALID', 'Historical preconditions are not available on this binding')
-      return request
-    case 'cancel': case 'unsub': case 'act': return request
-    default: throw new KernelError('INVALID', 'Unsupported lane command')
+      if (request.expect?.selectors?.some((input) => 'history' in input.selector))
+        throw new KernelError(
+          'INVALID',
+          'Historical preconditions are not available on this binding',
+        );
+      return request;
+    case 'cancel':
+    case 'unsub':
+    case 'act':
+      return request;
+    default:
+      throw new KernelError('INVALID', 'Unsupported lane command');
   }
 }
 
 export function createTwpServing(instance: InstanceFoundationWithAuth) {
-  const lanes = new Map<string, ServedLane>()
-  let closed = false
-  function available(): void { if (closed) throw new KernelError('UNAVAILABLE', 'Serving is closed') }
+  const lanes = new Map<string, ServedLane>();
+  let closed = false;
+  function available(): void {
+    if (closed) throw new KernelError('UNAVAILABLE', 'Serving is closed');
+  }
   function authorized(id: string, credential: Credential | undefined, origin: string): ServedLane {
-    available()
-    const found = lanes.get(id)
-    if (found === undefined || credential === undefined || tokenHash(credential.token) !== found.credentialHash || origin !== found.origin)
-      throw new KernelError('UNAUTHENTICATED', 'Lane authorization failed')
-    found.admission.assertActive()
-    return found
+    available();
+    const found = lanes.get(id);
+    if (
+      found === undefined ||
+      credential === undefined ||
+      tokenHash(credential.token) !== found.credentialHash ||
+      origin !== found.origin
+    )
+      throw new KernelError('UNAUTHENTICATED', 'Lane authorization failed');
+    found.admission.assertActive();
+    return found;
   }
   return {
     /** Open a lane after validating the handshake and binding credentials. */
@@ -60,7 +75,7 @@ export function createTwpServing(instance: InstanceFoundationWithAuth) {
       let cache: readonly CacheClaim[] | undefined;
       if (hi.cache !== undefined && hi.cache.length > 0) {
         const ids = new Set<string>();
-        cache = hi.cache.map(claim => {
+        cache = hi.cache.map((claim) => {
           if (ids.has(claim.id)) throw new KernelError('INVALID', 'Duplicate cache claim');
           ids.add(claim.id);
           return Object.freeze({ ...claim });
@@ -118,29 +133,50 @@ export function createTwpServing(instance: InstanceFoundationWithAuth) {
         throw error;
       }
     },
-    dispatch(id: string, credential: Credential | undefined, origin: string, requests: readonly Request[]): void {
-      const found = authorized(id, credential, origin), decoded = requests.map(command)
-      found.lane.touch()
-      for (const request of decoded) found.lane.accept(request)
+    dispatch(
+      id: string,
+      credential: Credential | undefined,
+      origin: string,
+      requests: readonly Request[],
+    ): void {
+      const found = authorized(id, credential, origin),
+        decoded = requests.map(command);
+      found.lane.touch();
+      for (const request of decoded) found.lane.accept(request);
     },
     attach(id: string, credential: Credential | undefined, origin: string) {
-      const found = authorized(id, credential, origin)
-      if (found.attached) throw new KernelError('CONFLICT', 'Lane already has a reader')
-      found.attached = true; found.lane.touch()
-      return { frames: found.lane.frames, close: found.close }
+      const found = authorized(id, credential, origin);
+      if (found.attached) throw new KernelError('CONFLICT', 'Lane already has a reader');
+      found.attached = true;
+      found.lane.touch();
+      return { frames: found.lane.frames, close: found.close };
     },
     /** Binary requests retain the credential and origin admission of their actual lane. */
-    upload(id: string, credential: Credential | undefined, origin: string, parts: AsyncIterable<Uint8Array>, type: string, signal?: AbortSignal) {
-      return authorized(id, credential, origin).lane.upload(parts, type, signal)
+    upload(
+      id: string,
+      credential: Credential | undefined,
+      origin: string,
+      parts: AsyncIterable<Uint8Array>,
+      type: string,
+      signal?: AbortSignal,
+    ) {
+      return authorized(id, credential, origin).lane.upload(parts, type, signal);
     },
-    download(id: string, credential: Credential | undefined, origin: string, path: string, field: string, signal?: AbortSignal) {
-      return authorized(id, credential, origin).lane.download(path, field, signal)
+    download(
+      id: string,
+      credential: Credential | undefined,
+      origin: string,
+      path: string,
+      field: string,
+      signal?: AbortSignal,
+    ) {
+      return authorized(id, credential, origin).lane.download(path, field, signal);
     },
     close() {
-      if (closed) return
-      closed = true
-      for (const record of lanes.values()) record.close()
+      if (closed) return;
+      closed = true;
+      for (const record of lanes.values()) record.close();
     },
-  }
+  };
 }
-export type TwpServing = ReturnType<typeof createTwpServing>
+export type TwpServing = ReturnType<typeof createTwpServing>;

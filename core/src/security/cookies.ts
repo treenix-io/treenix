@@ -11,7 +11,10 @@ export const SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
 // returning-visitor identity persistence is a feature (analytics/UX).
 export const ANON_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
 
-export function buildSessionCookie(token: string, maxAgeSeconds: number = SESSION_COOKIE_MAX_AGE): string {
+export function buildSessionCookie(
+  token: string,
+  maxAgeSeconds: number = SESSION_COOKIE_MAX_AGE,
+): string {
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}`;
 }
 export function buildClearSessionCookie(): string {

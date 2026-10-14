@@ -17,15 +17,39 @@ const { name: _stopArgumentName, ...stopArgument } = autostartSchema.methods.sto
 export function nativeAutostartManifest(cls: Class<object>): ModuleManifest {
   const id = '@treenx/core/autostart';
   Object.assign(cls, { $type: 't.autostart' });
-  const start: ActionDef = { kind: 'write', args: { ...startArgument, type: 'object' }, handler: nativeStart };
-  const stop: ActionDef = { kind: 'write', args: { ...stopArgument, type: 'object' }, handler: nativeStop };
-  return { ...declareOpenModule(id, [
-    { type: 't.autostart', context: 'class', handler: { handler: cls, meta: { security: 'user-capability' } } },
-    { type: 't.autostart', context: 'schema', handler: () => schema },
-    { type: 't.autostart', context: 'action:start', handler: start },
-    { type: 't.autostart', context: 'action:stop', handler: stop },
-  ]), types: [buildRegisteredTypeDef({ name: 't.autostart', module: id, security: 'user-capability',
-    schema, methods: [], actions: { start, stop } })], security: [] };
+  const start: ActionDef = {
+    kind: 'write',
+    args: { ...startArgument, type: 'object' },
+    handler: nativeStart,
+  };
+  const stop: ActionDef = {
+    kind: 'write',
+    args: { ...stopArgument, type: 'object' },
+    handler: nativeStop,
+  };
+  return {
+    ...declareOpenModule(id, [
+      {
+        type: 't.autostart',
+        context: 'class',
+        handler: { handler: cls, meta: { security: 'user-capability' } },
+      },
+      { type: 't.autostart', context: 'schema', handler: () => schema },
+      { type: 't.autostart', context: 'action:start', handler: start },
+      { type: 't.autostart', context: 'action:stop', handler: stop },
+    ]),
+    types: [
+      buildRegisteredTypeDef({
+        name: 't.autostart',
+        module: id,
+        security: 'user-capability',
+        schema,
+        methods: [],
+        actions: { start, stop },
+      }),
+    ],
+    security: [],
+  };
 }
 
 /** Writes the caller-owned ref that requests a service start. */
@@ -64,7 +88,12 @@ async function nativeStop(ctx: WriteActionContext, input: unknown): Promise<void
 
 /** Validates the caller's requested service path at the action boundary. */
 function servicePath(input: unknown): string {
-  if (typeof input !== 'object' || input === null || !('path' in input) || typeof input.path !== 'string')
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    !('path' in input) ||
+    typeof input.path !== 'string'
+  )
     throw new KernelError('INVALID', 'Service path is required');
 
   try {

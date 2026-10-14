@@ -2,14 +2,7 @@
 
 import { parseNeeds, type NeedSpec } from '#comp/needs';
 import { CtxUnavailableError, currentExecCtx, type ExecCtx } from '#comp/context';
-import {
-  type Class,
-  ComponentData,
-  getComponent,
-  compKey,
-  NodeData,
-  normalizeType,
-} from '#core';
+import { type Class, ComponentData, getComponent, compKey, NodeData, normalizeType } from '#core';
 import type { SecurityClass } from '#kernel/types';
 
 export type { Class };
@@ -19,7 +12,15 @@ export type TypeClass<T> = Class<T> & {
 
 // Strip methods from a type — only keep data fields (recursive)
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-export type Raw<T> = { [K in keyof T as T[K] extends Function ? never : K]: T[K] extends (infer U)[] ? U extends object ? Raw<U>[] : T[K] : T[K] extends object ? Raw<T[K]> : T[K] };
+export type Raw<T> = {
+  [K in keyof T as T[K] extends Function ? never : K]: T[K] extends (infer U)[]
+    ? U extends object
+      ? Raw<U>[]
+      : T[K]
+    : T[K] extends object
+      ? Raw<T[K]>
+      : T[K];
+};
 
 // Actions<T>: map class methods to typed async client signatures
 // Uses Parameters<>/ReturnType<> to avoid TypeScript's "() => T extends (x: D) => T" false-match.
@@ -31,16 +32,20 @@ type _AnyFn = (...args: any[]) => any;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 type _ToFn<T> = T extends _AnyFn ? T : never;
 
-type _ActionArgs<T extends _AnyFn> = Parameters<T> extends []
-  ? []
-  : Parameters<T> extends [infer D, ...any[]] ? [data: D] : [data?: Parameters<T>[0]];
+type _ActionArgs<T extends _AnyFn> =
+  Parameters<T> extends []
+    ? []
+    : Parameters<T> extends [infer D, ...any[]]
+      ? [data: D]
+      : [data?: Parameters<T>[0]];
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type Actions<T> = {
-  [K in keyof T as T[K] extends Function ? K : never]:
-    (...args: _ActionArgs<_ToFn<T[K]>>) =>
-      ReturnType<_ToFn<T[K]>> extends AsyncGenerator<infer Y, any, any>
-        ? AsyncIterable<Y> : Promise<Awaited<ReturnType<_ToFn<T[K]>>>>
+  [K in keyof T as T[K] extends Function ? K : never]: (
+    ...args: _ActionArgs<_ToFn<T[K]>>
+  ) => ReturnType<_ToFn<T[K]>> extends AsyncGenerator<infer Y, any, any>
+    ? AsyncIterable<Y>
+    : Promise<Awaited<ReturnType<_ToFn<T[K]>>>>;
 };
 
 // TypeProxy<T>: readonly data fields + async action methods
@@ -63,15 +68,18 @@ export function getCtx(): ExecCtx {
 
 // ── Declarations ──
 
-type ActionName<T> = Extract<{
-  [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
-}[keyof T], string>;
+type ActionName<T> = Extract<
+  {
+    [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
+  }[keyof T],
+  string
+>;
 export type CompOptions<T> = {
   security?: SecurityClass;
   needs?: Partial<Record<ActionName<T> | '*', readonly string[]>>;
   noOptimistic?: string[];
 };
-export const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
+export const AsyncGenFn = Object.getPrototypeOf(async function* () {}).constructor;
 
 export type ActionMethod = { name: string; method: (...args: any[]) => unknown };
 
@@ -86,7 +94,10 @@ export function actionMethods<T>(cls: Class<T>): ActionMethod[] {
   return methods;
 }
 
-export function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>): Map<string, NeedSpec[]> {
+export function compileNeeds<T>(
+  methods: ActionMethod[],
+  opts?: CompOptions<T>,
+): Map<string, NeedSpec[]> {
   const declared = opts?.needs;
   if (!declared) return new Map();
 
@@ -110,7 +121,12 @@ export function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>):
 // kriz: component type could change, or anything could change. let's discuss, and find the way.
 // kriz: function like this should be like updateComponent, not set.
 // kriz: so, let's discuss this set of functions
-export function setComponent<T>(node: NodeData, cls: Class<T>, data: Partial<Raw<T>>, field?: string): void {
+export function setComponent<T>(
+  node: NodeData,
+  cls: Class<T>,
+  data: Partial<Raw<T>>,
+  field?: string,
+): void {
   const comp = getComponent(node, cls, field);
   if (comp) {
     Object.assign(comp as object, data);

@@ -8,7 +8,9 @@ describe('component actions without a server context runtime', () => {
   it('runs context-free actions for optimistic prediction', () => {
     class Counter {
       count = 0;
-      increment() { this.count++; }
+      increment() {
+        this.count++;
+      }
     }
     const action = declareClientType('browser.counter', Counter).predictions.increment;
     const node: NodeData = { $path: '/counter', $type: 'browser.counter', count: 0 };
@@ -61,7 +63,9 @@ describe('component actions without a server context runtime', () => {
     const action = declareClientType('browser.context-reader', ContextReader).predictions.read;
     const node: NodeData = { $path: '/reader', $type: 'browser.context-reader' };
 
-    await assert.rejects(async () => await action(node, node, {}),
-      (e: unknown) => e instanceof CtxUnavailableError && e.code === 'CTX_UNAVAILABLE');
+    await assert.rejects(
+      async () => await action(node, node, {}),
+      (e: unknown) => e instanceof CtxUnavailableError && e.code === 'CTX_UNAVAILABLE',
+    );
   });
 });

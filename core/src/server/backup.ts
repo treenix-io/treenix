@@ -13,7 +13,10 @@ import { SUPPORTED_DATA_VERSION, readDataVersion, DATA_VERSION_FILE } from '#ser
 import { isRecord } from '#util/is-record';
 
 export class BackupError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
     super(message);
     this.name = 'BackupError';
   }
@@ -64,11 +67,20 @@ const MANIFEST = 'manifest.json';
 
 // Mount components on a node body: the node-level $type plus every '#' component.
 function mountsIn(body: Record<string, unknown>): Array<Record<string, unknown>> {
-  const candidates = [body, ...Object.keys(body).filter(isCompKey).map((k) => body[k])];
+  const candidates = [
+    body,
+    ...Object.keys(body)
+      .filter(isCompKey)
+      .map((k) => body[k]),
+  ];
   const out: Array<Record<string, unknown>> = [];
   for (const v of candidates) {
-    if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).$type === 'string'
-      && ((v as Record<string, unknown>).$type as string).startsWith('t.mount.')) {
+    if (
+      v &&
+      typeof v === 'object' &&
+      typeof (v as Record<string, unknown>).$type === 'string' &&
+      ((v as Record<string, unknown>).$type as string).startsWith('t.mount.')
+    ) {
       out.push(v as Record<string, unknown>);
     }
   }
@@ -77,7 +89,8 @@ function mountsIn(body: Record<string, unknown>): Array<Record<string, unknown>>
 
 // Host + db/collection only — never the URI (credentials stay in the data files).
 function externalDetail(mount: Record<string, unknown>): string {
-  if (mount.$type === 't.mount.mongo') return `db=${mount.db ?? 'treenix'} collection=${mount.collection ?? 'nodes'}`;
+  if (mount.$type === 't.mount.mongo')
+    return `db=${mount.db ?? 'treenix'} collection=${mount.collection ?? 'nodes'}`;
   if (typeof mount.url === 'string') {
     try {
       const u = new URL(mount.url);
@@ -89,21 +102,35 @@ function externalDetail(mount: Record<string, unknown>): string {
   return '';
 }
 
-interface DirJob { root: string; kind: 'fs' | 'rawfs' }
+interface DirJob {
+  root: string;
+  kind: 'fs' | 'rawfs';
+}
 
 /** Native control JSON belongs to the physical snapshot, rather than its addressed nodes. */
 function nodeFile(root: string, file: string): boolean {
-  return (basename(file) === '$' || file.endsWith('.json'))
-    && !file.startsWith(join(root, '.treenix') + sep);
+  return (
+    (basename(file) === '$' || file.endsWith('.json')) &&
+    !file.startsWith(join(root, '.treenix') + sep)
+  );
 }
 
-function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob[], external: ExternalMount[], directories: Readonly<Record<string, string>>): void {
+function classifyMount(
+  mount: Record<string, unknown>,
+  at: string,
+  queue: DirJob[],
+  external: ExternalMount[],
+  directories: Readonly<Record<string, string>>,
+): void {
   const type = mount.$type as string;
   if (type === 't.mount.fs' || type === 't.mount.rawfs') {
     let root: string;
     if (typeof mount.directory === 'string') {
       if (!Object.hasOwn(directories, mount.directory))
-        throw new BackupError('BAD_MOUNT', `${at}: directory capability ${mount.directory} is not configured`);
+        throw new BackupError(
+          'BAD_MOUNT',
+          `${at}: directory capability ${mount.directory} is not configured`,
+        );
       root = directories[mount.directory];
     } else if (typeof mount.root === 'string' && mount.root.length > 0) {
       root = mount.root;
@@ -120,8 +147,12 @@ function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob
 // Copy filesystem data and native controls byte-for-byte, validating addressed
 // node bodies and collecting the mounts they declare.
 async function copyFsDir(
-  src: string, dest: string, dirRoot: string,
-  queue: DirJob[], external: ExternalMount[], warnings: string[],
+  src: string,
+  dest: string,
+  dirRoot: string,
+  queue: DirJob[],
+  external: ExternalMount[],
+  warnings: string[],
   directories: Readonly<Record<string, string>>,
 ): Promise<{ nodes: number; files: number }> {
   let nodes = 0;
@@ -145,7 +176,8 @@ async function copyFsDir(
         const body = safeJsonParse(raw.toString('utf-8'));
         if (nodeFile(src, full)) {
           assertValidType(body.$type);
-          for (const m of mountsIn(body)) classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external, directories);
+          for (const m of mountsIn(body))
+            classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external, directories);
           nodes++;
         } else {
           files++;
@@ -178,16 +210,26 @@ async function countDir(dir: string): Promise<{ nodes: number; files: number }> 
 }
 
 async function engineVersion(): Promise<string> {
-  const pkg = safeJsonParse(await readFile(join(import.meta.dirname, '../../package.json'), 'utf-8'));
+  const pkg = safeJsonParse(
+    await readFile(join(import.meta.dirname, '../../package.json'), 'utf-8'),
+  );
   return pkg.version;
 }
 
-export async function backupInstance(rootJsonPath: string, outParent: string, log: Log = console.log, options: BackupOptions = {}): Promise<{ artifactDir: string; manifest: BackupManifest }> {
+export async function backupInstance(
+  rootJsonPath: string,
+  outParent: string,
+  log: Log = console.log,
+  options: BackupOptions = {},
+): Promise<{ artifactDir: string; manifest: BackupManifest }> {
   let configRaw: string;
   try {
     configRaw = await readFile(resolve(rootJsonPath), 'utf-8');
   } catch (e) {
-    throw new BackupError('NO_CONFIG', `cannot read config ${rootJsonPath}: ${(e as Error).message}`);
+    throw new BackupError(
+      'NO_CONFIG',
+      `cannot read config ${rootJsonPath}: ${(e as Error).message}`,
+    );
   }
   const rootNode = safeJsonParse(configRaw);
   const directories: Record<string, string> = {};
@@ -226,8 +268,10 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
   const queue: DirJob[] = [];
   const external: ExternalMount[] = [];
   const warnings: string[] = [];
-  for (const m of mountsIn(rootNode)) classifyMount(m, basename(rootJsonPath), queue, external, directories);
-  if (queue.length === 0) warnings.push('config declares no fs/rawfs mounts — artifact contains config only');
+  for (const m of mountsIn(rootNode))
+    classifyMount(m, basename(rootJsonPath), queue, external, directories);
+  if (queue.length === 0)
+    warnings.push('config declares no fs/rawfs mounts — artifact contains config only');
 
   const dirs: BackupDirEntry[] = [];
   const seen = new Set<string>();
@@ -241,7 +285,11 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
       const s = await stat(src);
       if (!s.isDirectory()) throw new BackupError('BAD_MOUNT', `${job.root}: not a directory`);
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new BackupError('BAD_MOUNT', `${job.root}: mount dir does not exist (run from the server CWD)`);
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT')
+        throw new BackupError(
+          'BAD_MOUNT',
+          `${job.root}: mount dir does not exist (run from the server CWD)`,
+        );
       throw e;
     }
 
@@ -250,7 +298,15 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
     log(`[backup] ${job.kind} ${job.root} → ${artifactPath}`);
 
     if (job.kind === 'fs') {
-      const { nodes, files } = await copyFsDir(src, dest, job.root, queue, external, warnings, directories);
+      const { nodes, files } = await copyFsDir(
+        src,
+        dest,
+        job.root,
+        queue,
+        external,
+        warnings,
+        directories,
+      );
       dirs.push({ root: job.root, kind: 'fs', artifactPath, nodes, files });
     } else {
       await cp(src, dest, { recursive: true, verbatimSymlinks: true });
@@ -259,7 +315,8 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
     }
   }
 
-  for (const x of external) log(`[backup] NOT covered: ${x.type} at ${x.at} (${x.detail}) — back up that store separately`);
+  for (const x of external)
+    log(`[backup] NOT covered: ${x.type} at ${x.at} (${x.detail}) — back up that store separately`);
   for (const w of warnings) log(`[backup] warning: ${w}`);
 
   // Manifest written LAST — its presence marks a complete backup; verify/restore refuse without it.
@@ -276,7 +333,9 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
   };
   await writeFile(join(artifactDir, MANIFEST), JSON.stringify(manifest, null, 2) + '\n');
 
-  log(`[backup] done: ${artifactDir} (${dirs.length} dirs, ${dirs.reduce((n, d) => n + d.nodes, 0)} nodes)`);
+  log(
+    `[backup] done: ${artifactDir} (${dirs.length} dirs, ${dirs.reduce((n, d) => n + d.nodes, 0)} nodes)`,
+  );
   return { artifactDir, manifest };
 }
 
@@ -285,10 +344,17 @@ async function readManifest(artifactDir: string): Promise<BackupManifest> {
   try {
     raw = await readFile(join(artifactDir, MANIFEST), 'utf-8');
   } catch {
-    throw new BackupError('NOT_A_BACKUP', `${artifactDir}: no ${MANIFEST} — not a backup artifact or backup was interrupted`);
+    throw new BackupError(
+      'NOT_A_BACKUP',
+      `${artifactDir}: no ${MANIFEST} — not a backup artifact or backup was interrupted`,
+    );
   }
   const m = safeJsonParse(raw);
-  if (m.treenixBackup !== 1) throw new BackupError('NOT_A_BACKUP', `${artifactDir}: unsupported artifact format ${m.treenixBackup}`);
+  if (m.treenixBackup !== 1)
+    throw new BackupError(
+      'NOT_A_BACKUP',
+      `${artifactDir}: unsupported artifact format ${m.treenixBackup}`,
+    );
   return m as BackupManifest;
 }
 
@@ -315,14 +381,23 @@ async function verifyFsDir(dir: string): Promise<{ nodes: number; files: number 
   }
 
   const v = await readDataVersion(dir);
-  if (v > SUPPORTED_DATA_VERSION) throw new BackupError('VERSION_AHEAD', `${dir}: ${DATA_VERSION_FILE} is ${v}, this engine supports ${SUPPORTED_DATA_VERSION} — upgrade the engine before restoring`);
+  if (v > SUPPORTED_DATA_VERSION)
+    throw new BackupError(
+      'VERSION_AHEAD',
+      `${dir}: ${DATA_VERSION_FILE} is ${v}, this engine supports ${SUPPORTED_DATA_VERSION} — upgrade the engine before restoring`,
+    );
   return { nodes, files };
 }
 
-export async function verifyArtifact(artifactDir: string, log: Log = console.log): Promise<BackupManifest> {
+export async function verifyArtifact(
+  artifactDir: string,
+  log: Log = console.log,
+): Promise<BackupManifest> {
   const manifest = await readManifest(artifactDir);
   if (manifest.deploymentConfig !== undefined) {
-    safeJsonParse(await readFile(join(artifactDir, manifest.deploymentConfig.artifactPath), 'utf8'));
+    safeJsonParse(
+      await readFile(join(artifactDir, manifest.deploymentConfig.artifactPath), 'utf8'),
+    );
   }
 
   for (const d of manifest.dirs) {
@@ -330,11 +405,18 @@ export async function verifyArtifact(artifactDir: string, log: Log = console.log
     if (d.kind === 'fs') {
       const { nodes, files } = await verifyFsDir(dir);
       if (nodes !== d.nodes || files !== d.files) {
-        throw new BackupError('COUNT_MISMATCH', `${dir}: manifest says ${d.nodes} nodes/${d.files} files, found ${nodes}/${files}`);
+        throw new BackupError(
+          'COUNT_MISMATCH',
+          `${dir}: manifest says ${d.nodes} nodes/${d.files} files, found ${nodes}/${files}`,
+        );
       }
     } else {
       const { nodes, files } = await countDir(dir);
-      if (nodes + files !== d.files) throw new BackupError('COUNT_MISMATCH', `${dir}: manifest says ${d.files} files, found ${nodes + files}`);
+      if (nodes + files !== d.files)
+        throw new BackupError(
+          'COUNT_MISMATCH',
+          `${dir}: manifest says ${d.files} files, found ${nodes + files}`,
+        );
     }
     log(`[verify] ok: ${d.kind} ${d.root} (${d.nodes} nodes, ${d.files} files)`);
   }
@@ -349,7 +431,11 @@ export interface RestoreOpts {
   replace?: boolean;
 }
 
-export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {}, log: Log = console.log): Promise<BackupManifest> {
+export async function restoreArtifact(
+  artifactDir: string,
+  opts: RestoreOpts = {},
+  log: Log = console.log,
+): Promise<BackupManifest> {
   const manifest = await verifyArtifact(artifactDir, () => {});
   const base = resolve(opts.into ?? '.');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -358,7 +444,10 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
   const targets: Array<{ src: string; dest: string }> = [];
   for (const d of manifest.dirs) {
     if (opts.into && d.root.startsWith('/')) {
-      throw new BackupError('ABSOLUTE_ROOT', `${d.root}: absolute mount root cannot be redirected with --into — restore in place`);
+      throw new BackupError(
+        'ABSOLUTE_ROOT',
+        `${d.root}: absolute mount root cannot be redirected with --into — restore in place`,
+      );
     }
     targets.push({ src: join(artifactDir, d.artifactPath), dest: resolve(base, d.root) });
   }
@@ -371,7 +460,11 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     }
     if (!occupied) continue;
-    if (!opts.replace) throw new BackupError('TARGET_NOT_EMPTY', `${t.dest}: target dir is not empty — pass --replace to move it aside`);
+    if (!opts.replace)
+      throw new BackupError(
+        'TARGET_NOT_EMPTY',
+        `${t.dest}: target dir is not empty — pass --replace to move it aside`,
+      );
     const aside = `${t.dest}.pre-restore-${stamp}`;
     log(`[restore] moving existing ${t.dest} → ${aside}`);
     await rename(t.dest, aside);
@@ -382,7 +475,9 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
     await cp(t.src, t.dest, { recursive: true, verbatimSymlinks: true });
   }
 
-  const configTarget = opts.into ? join(base, manifest.rootConfig) : resolve(manifest.rootConfigPath);
+  const configTarget = opts.into
+    ? join(base, manifest.rootConfig)
+    : resolve(manifest.rootConfigPath);
   const configSrc = join(artifactDir, manifest.rootConfig);
   let existing: string | undefined;
   try {
@@ -393,15 +488,15 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
   if (existing === undefined) {
     await cp(configSrc, configTarget);
     log(`[restore] config → ${configTarget}`);
-  } else if (existing !== await readFile(configSrc, 'utf-8')) {
-    log(`[restore] WARNING: ${configTarget} differs from the artifact's config — kept the existing file, artifact copy at ${configSrc}`);
+  } else if (existing !== (await readFile(configSrc, 'utf-8'))) {
+    log(
+      `[restore] WARNING: ${configTarget} differs from the artifact's config — kept the existing file, artifact copy at ${configSrc}`,
+    );
   }
 
   if (manifest.deploymentConfig !== undefined) {
     const deployment = manifest.deploymentConfig;
-    const target = opts.into
-      ? resolve(base, deployment.relativePath)
-      : deployment.originalPath;
+    const target = opts.into ? resolve(base, deployment.relativePath) : deployment.originalPath;
     const source = join(artifactDir, deployment.artifactPath);
     let current: string | undefined;
     try {
@@ -412,8 +507,10 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
     if (current === undefined) {
       await mkdir(dirname(target), { recursive: true });
       await cp(source, target);
-    } else if (current !== await readFile(source, 'utf8')) {
-      log(`[restore] WARNING: ${target} differs from the deployment config — kept the existing file`);
+    } else if (current !== (await readFile(source, 'utf8'))) {
+      log(
+        `[restore] WARNING: ${target} differs from the deployment config — kept the existing file`,
+      );
     }
   }
 
@@ -422,11 +519,17 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
     if (d.kind !== 'fs') continue;
     const { nodes, files } = await verifyFsDir(resolve(base, d.root));
     if (nodes !== d.nodes || files !== d.files) {
-      throw new BackupError('COUNT_MISMATCH', `${resolve(base, d.root)}: restored ${nodes} nodes/${files} files, expected ${d.nodes}/${d.files}`);
+      throw new BackupError(
+        'COUNT_MISMATCH',
+        `${resolve(base, d.root)}: restored ${nodes} nodes/${files} files, expected ${d.nodes}/${d.files}`,
+      );
     }
   }
 
-  for (const x of manifest.external) log(`[restore] NOT restored: ${x.type} at ${x.at} (${x.detail}) — restore that store separately`);
+  for (const x of manifest.external)
+    log(
+      `[restore] NOT restored: ${x.type} at ${x.at} (${x.detail}) — restore that store separately`,
+    );
   log(`[restore] done: ${manifest.dirs.length} dirs verified`);
   return manifest;
 }

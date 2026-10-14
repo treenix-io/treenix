@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  compKey, compName, createNode, getComponent, getComponentByName,
-  getComponentField, getComponents, isCompKey, removeComponent,
+  compKey,
+  compName,
+  createNode,
+  getComponent,
+  getComponentByName,
+  getComponentField,
+  getComponents,
+  isCompKey,
+  removeComponent,
 } from './component';
 
 describe('compKey / compName', () => {
@@ -37,9 +44,14 @@ describe('compKey / compName', () => {
 
 describe('makeNode — components land under #', () => {
   it('prefixes component-arg keys', () => {
-    const node = createNode('/t', 'task', { title: 'x' }, {
-      status: { $type: 'status', value: 'open' },
-    });
+    const node = createNode(
+      '/t',
+      'task',
+      { title: 'x' },
+      {
+        status: { $type: 'status', value: 'open' },
+      },
+    );
     assert.equal(node['#status'].value, 'open');
     assert.equal(node.title, 'x');
     assert.ok(!('status' in node));
@@ -62,7 +74,10 @@ describe('strict classification — prefix, not $type sniffing', () => {
       snapshot: { $type: 'crm.deal', $path: '/clients/acme/d1', amount: 5 },
     });
     assert.equal(getComponent(node, 'crm.deal'), undefined);
-    assert.deepEqual(getComponents(node).map(([k]) => k), ['']);
+    assert.deepEqual(
+      getComponents(node).map(([k]) => k),
+      [''],
+    );
     assert.equal(getComponentByName(node, 'snapshot'), undefined);
   });
 

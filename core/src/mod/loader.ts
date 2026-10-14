@@ -4,11 +4,11 @@ import { isInsideRoot } from '#core/path';
 import { safeJsonParse } from '#util/json';
 import { createLogger } from '#log';
 import { KernelError } from '#errors';
-import { readdir,readFile,realpath,stat } from 'node:fs/promises';
-import { dirname,join,resolve } from 'node:path';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import type { LoadedMod } from './types';
-import type { CollectedModule,NativeModuleExports,NativeModuleHost } from '#kernel/manifest';
-import type { ActionIoBinding,Gate,Io,Registry } from '#kernel/types';
+import type { CollectedModule, NativeModuleExports, NativeModuleHost } from '#kernel/manifest';
+import type { ActionIoBinding, Gate, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
 
@@ -75,7 +75,10 @@ const SERVER_CONVENTION = ['types', 'seed', 'service'];
 const SERVER_EXT = ['.ts', '.js'];
 
 async function exists(path: string): Promise<boolean> {
-  try { await stat(path); return true; } catch (error) {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
     throw error;
   }
@@ -103,7 +106,8 @@ async function resolveFirst(dir: string, bases: string[], exts: string[]): Promi
 async function packageNameAt(modsDir: string): Promise<string | null> {
   try {
     const pkg = safeJsonParse(await readFile(join(modsDir, 'package.json'), 'utf-8'));
-    if (typeof pkg.name !== 'string' || pkg.name.length === 0) throw new TypeError('The mod package needs a name');
+    if (typeof pkg.name !== 'string' || pkg.name.length === 0)
+      throw new TypeError('The mod package needs a name');
     return pkg.name;
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
@@ -143,13 +147,18 @@ function basenameNoExt(p: string): string {
 let _tsxRegistered: Promise<void> | null = null;
 async function ensureTsxRegistered(): Promise<void> {
   if (process.versions.bun !== undefined) return;
-  _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => { register(); });
+  _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => {
+    register();
+  });
   return _tsxRegistered;
 }
 
-
 /** Loads target entries and collects manifests when running in the native kernel. */
-export async function loadLocalMods(modsDir: string, _target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
+export async function loadLocalMods(
+  modsDir: string,
+  _target: LoadTarget,
+  options: ModuleLoadOptions = {},
+): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [], manifests: [] };
   let entries: import('node:fs').Dirent[];
 
@@ -172,8 +181,10 @@ export async function loadLocalMods(modsDir: string, _target: LoadTarget, option
 
     const modDir = join(modsDir, entry.name);
     const entryPath = await resolveFirst(modDir, ['kernel'], SERVER_EXT);
-    const legacyEntry = entryPath === null
-      ? await resolveFirst(modDir, ['server', ...SERVER_CONVENTION], SERVER_EXT) : null;
+    const legacyEntry =
+      entryPath === null
+        ? await resolveFirst(modDir, ['server', ...SERVER_CONVENTION], SERVER_EXT)
+        : null;
 
     if (entryPath === null && legacyEntry === null) continue;
 
@@ -182,11 +193,16 @@ export async function loadLocalMods(modsDir: string, _target: LoadTarget, option
 
     try {
       // Refuse before importing: legacy entries can start services or register process-wide handlers.
-      if (entryPath === null) throw Object.assign(new KernelError('INVALID', 'Module requires a native kernel entry'), { entry: legacyEntry });
+      if (entryPath === null)
+        throw Object.assign(new KernelError('INVALID', 'Module requires a native kernel entry'), {
+          entry: legacyEntry,
+        });
       const id = `${native.package}/${entry.name}`;
       const real = await confineReal(modDir, entryPath);
       if (real.endsWith('.ts')) await ensureTsxRegistered();
-      const imported: NativeModuleExports = await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
+      const imported: NativeModuleExports = await import(
+        pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real
+      );
       const deployment = await native.api.evaluateModuleFactory(imported, options.host);
       result.manifests.push(native.api.materializeModule(id, deployment));
       modEntry.state = 'loaded';
@@ -208,12 +224,13 @@ export async function loadLocalMods(modsDir: string, _target: LoadTarget, option
 export function bindModuleIo(bindings: readonly ActionIoBinding[]): ActionIoBinding | undefined {
   if (bindings.length === 0) return undefined;
   if (bindings.length === 1) return bindings[0];
-  return scope => {
+  return (scope) => {
     const ports: Io = {};
     for (const binding of bindings) {
       const declared = binding(scope);
       for (const name of Object.keys(declared))
-        if (Object.hasOwn(ports, name)) throw new KernelError('CONFLICT', 'Native module IO port has more than one owner');
+        if (Object.hasOwn(ports, name))
+          throw new KernelError('CONFLICT', 'Native module IO port has more than one owner');
       Object.assign(ports, declared);
     }
     return Object.freeze(ports);
@@ -233,17 +250,26 @@ function moduleIo(manifests: readonly CollectedModule[]): ActionIoBinding | unde
   return bindModuleIo(bindings);
 }
 
-export async function publishLoadedModules(registry: Registry, result: LoadResult, options: { allowPartialMods?: boolean } = {}): Promise<void> {
+export async function publishLoadedModules(
+  registry: Registry,
+  result: LoadResult,
+  options: { allowPartialMods?: boolean } = {},
+): Promise<void> {
   const native = await import('#kernel/manifest');
   if (result.failed.length && !options.allowPartialMods) {
-    throw Object.assign(new KernelError('INVALID', 'Module loading failed'), { failures: result.failed });
+    throw Object.assign(new KernelError('INVALID', 'Module loading failed'), {
+      failures: result.failed,
+    });
   }
   native.publishModules(registry, result.manifests);
 }
 
 // ── Load all mods: internal + engine + project (CWD) ──
 
-export async function loadAllMods(target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
+export async function loadAllMods(
+  target: LoadTarget,
+  options: ModuleLoadOptions = {},
+): Promise<LoadResult> {
   const extraDirs = options.extraDirs ?? [];
   const internalDir = new URL('../mods', import.meta.url).pathname;
   const engineDir = new URL('../../../mods', import.meta.url).pathname;
@@ -261,7 +287,10 @@ export async function loadAllMods(target: LoadTarget, options: ModuleLoadOptions
     if (resolve(projectDir) !== resolve(engineDir)) dirs.push(projectDir);
     dirs.push(...extraDirs);
   } else if (extraDirs.length) {
-    console.warn('[mod-loader] ignoring %d extra mod dir(s) — TREENIX_UNTRUSTED_MODS_DIR=1 is set', extraDirs.length);
+    console.warn(
+      '[mod-loader] ignoring %d extra mod dir(s) — TREENIX_UNTRUSTED_MODS_DIR=1 is set',
+      extraDirs.length,
+    );
   }
 
   const seen = new Set<string>();

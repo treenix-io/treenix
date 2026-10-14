@@ -5,41 +5,45 @@
 // Query: dot-notation for nesting (age.$gt=10 → { age: { $gt: 10 } })
 
 export interface TreenixURI {
-  path: string
-  key?: string
-  field?: string
-  action?: string
-  data?: Record<string, unknown>
+  path: string;
+  key?: string;
+  field?: string;
+  action?: string;
+  data?: Record<string, unknown>;
 }
 
 export function parseURI(uri: string): TreenixURI {
-  const url = new URL(uri, 'treenix://t')
+  const url = new URL(uri, 'treenix://t');
 
-  const path = url.pathname
-  if (!path.startsWith('/')) throw new Error('Path must start with /')
+  const path = url.pathname;
+  if (!path.startsWith('/')) throw new Error('Path must start with /');
 
-  const result: TreenixURI = { path }
+  const result: TreenixURI = { path };
 
-  const fragment = url.hash.slice(1) // strip leading #
+  const fragment = url.hash.slice(1); // strip leading #
   if (fragment) {
-    const isCall = fragment.endsWith('()')
-    const clean = isCall ? fragment.slice(0, -2) : fragment
-    if (!clean) throw new Error('Empty name in URI fragment')
+    const isCall = fragment.endsWith('()');
+    const clean = isCall ? fragment.slice(0, -2) : fragment;
+    if (!clean) throw new Error('Empty name in URI fragment');
 
-    const dot = clean.indexOf('.')
-    const key = dot > -1 ? clean.slice(0, dot) : undefined
-    const name = dot > -1 ? clean.slice(dot + 1) : clean
-    if (dot > -1 && !name) throw new Error('Empty name in URI fragment')
+    const dot = clean.indexOf('.');
+    const key = dot > -1 ? clean.slice(0, dot) : undefined;
+    const name = dot > -1 ? clean.slice(dot + 1) : clean;
+    if (dot > -1 && !name) throw new Error('Empty name in URI fragment');
 
-    if (key) result.key = key
-    if (isCall) { result.action = name }
-    else if (key) { result.field = name }
-    else { result.key = name }
+    if (key) result.key = key;
+    if (isCall) {
+      result.action = name;
+    } else if (key) {
+      result.field = name;
+    } else {
+      result.key = name;
+    }
   }
 
-  const data = url.search ? expandDots(url.searchParams) : undefined
-  if (data) result.data = data
-  return result
+  const data = url.search ? expandDots(url.searchParams) : undefined;
+  if (data) result.data = data;
+  return result;
 }
 
 /** Extract value from node by parsed URI (key + field).
@@ -47,50 +51,53 @@ export function parseURI(uri: string): TreenixURI {
  *  COMPONENT's field — components live under '#'-prefixed storage keys. A
  *  single '#name' reads the exact node key first (top-level data field), then
  *  falls back to the '#name' component — same rule as the tree-chain DSL. */
-export function deriveURI<T>(node: Record<string, unknown> | undefined, uri: TreenixURI): T | undefined {
-  if (!node) return undefined
-  if (!uri.key && !uri.field) return node as T
-  let comp: unknown = node
+export function deriveURI<T>(
+  node: Record<string, unknown> | undefined,
+  uri: TreenixURI,
+): T | undefined {
+  if (!node) return undefined;
+  if (!uri.key && !uri.field) return node as T;
+  let comp: unknown = node;
   if (uri.key) {
     // `in` check (not ??) so null/false/'' data values don't fall through to the component.
-    comp = uri.field ? node[`#${uri.key}`] : (uri.key in node ? node[uri.key] : node[`#${uri.key}`])
+    comp = uri.field ? node[`#${uri.key}`] : uri.key in node ? node[uri.key] : node[`#${uri.key}`];
   }
-  if (comp === undefined) return undefined
-  if (!uri.field) return comp as T
-  return (comp as Record<string, unknown>)?.[uri.field] as T
+  if (comp === undefined) return undefined;
+  if (!uri.field) return comp as T;
+  return (comp as Record<string, unknown>)?.[uri.field] as T;
 }
 
 /** Expand URLSearchParams with dot-notation into nested object */
 function expandDots(params: URLSearchParams): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
-  for (const [key, val] of params) setNested(result, key, coerce(val))
-  return result
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of params) setNested(result, key, coerce(val));
+  return result;
 }
 
 function coerce(v: string): unknown {
-  if (v === 'true') return true
-  if (v === 'false') return false
-  if (v === 'null') return null
-  const n = Number(v)
-  if (v !== '' && !isNaN(n)) return n
-  return v
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (v === 'null') return null;
+  const n = Number(v);
+  if (v !== '' && !isNaN(n)) return n;
+  return v;
 }
 
-const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function setNested(obj: Record<string, unknown>, path: string, val: unknown) {
-  const parts = path.split('.')
-  let cur = obj
+  const parts = path.split('.');
+  let cur = obj;
 
   for (let i = 0; i < parts.length - 1; i++) {
-    const p = parts[i]
-    if (FORBIDDEN_KEYS.has(p)) return
+    const p = parts[i];
+    if (FORBIDDEN_KEYS.has(p)) return;
     if (!(p in cur) || typeof cur[p] !== 'object' || cur[p] === null) {
-      cur[p] = Object.create(null)
+      cur[p] = Object.create(null);
     }
-    cur = cur[p] as Record<string, unknown>
+    cur = cur[p] as Record<string, unknown>;
   }
 
-  const last = parts[parts.length - 1]
-  if (!FORBIDDEN_KEYS.has(last)) cur[last] = val
+  const last = parts[parts.length - 1];
+  if (!FORBIDDEN_KEYS.has(last)) cur[last] = val;
 }

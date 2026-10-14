@@ -1,20 +1,20 @@
-import { KernelError } from '#errors'
+import { KernelError } from '#errors';
 
-const originalError = console.error
-const originalInfo = console.info
+const originalError = console.error;
+const originalInfo = console.info;
 
 console.error = (error: unknown, ...rest: unknown[]) => {
-  originalError(error, ...rest)
-  process.send?.({ type: 'error', code: error instanceof KernelError ? error.code : undefined })
-}
+  originalError(error, ...rest);
+  process.send?.({ type: 'error', code: error instanceof KernelError ? error.code : undefined });
+};
 console.info = (...values: unknown[]) => {
-  originalInfo(...values)
-  if (values[0] === 'Treenix native server listening:') process.send?.({ type: 'info', values })
-}
+  originalInfo(...values);
+  if (values[0] === 'Treenix native server listening:') process.send?.({ type: 'info', values });
+};
 
 process.once('exit', () => {
-  console.error = originalError
-  console.info = originalInfo
-})
+  console.error = originalError;
+  console.info = originalInfo;
+});
 
-await import('#server/main')
+await import('#server/main');

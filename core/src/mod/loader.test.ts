@@ -7,7 +7,7 @@ import { createTwpHttpRoutes } from '#server/http-routes';
 describe('all engine mods import', () => {
   beforeEach(() => clearModRegistry());
 
-  it('every engine native module factory loads without error', async t => {
+  it('every engine native module factory loads without error', async (t) => {
     const httpRoutes = createTwpHttpRoutes();
     const owner = httpRoutes.bind();
     t.after(() => owner.close());
@@ -17,7 +17,7 @@ describe('all engine mods import', () => {
     const result = await loadLocalMods(modsDir, 'kernel', { host: { httpRoutes } });
 
     if (result.failed.length) {
-      const details = result.failed.map(f => `  ${f.name}: ${f.error.message}`).join('\n');
+      const details = result.failed.map((f) => `  ${f.name}: ${f.error.message}`).join('\n');
       assert.fail(`${result.failed.length} mod(s) failed:\n${details}`);
     }
 

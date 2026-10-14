@@ -38,7 +38,8 @@ describe('extract-schemas-oxc', () => {
       console.warn = originalWarn;
     }
 
-    const read = async (file: string) => JSON.parse(await fs.readFile(path.join(schemasDir, file), 'utf-8'));
+    const read = async (file: string) =>
+      JSON.parse(await fs.readFile(path.join(schemasDir, file), 'utf-8'));
     schema = await read('test.schema-widget.json');
     exportedSchema = await read('test.exported-schema-widget.json');
     alphaSchema = await read('test.import-collision-alpha.json');
@@ -349,10 +350,7 @@ describe('extract-schemas-oxc', () => {
     // yielding title = "Display Name @description The human-readable name shown in UI"
     // and no description at all.
     assert.equal(schema.properties.displayName.title, 'Display Name');
-    assert.equal(
-      schema.properties.displayName.description,
-      'The human-readable name shown in UI',
-    );
+    assert.equal(schema.properties.displayName.description, 'The human-readable name shown in UI');
   });
 
   // ── Methods ──
@@ -398,8 +396,13 @@ describe('extract-schemas-oxc', () => {
   });
 
   it('@pre and @post JSON spanning several lines', () => {
-    assert.deepEqual(schema.methods.reset.pre, { 'node.count': { $gt: 0 }, 'node.scores': { $exists: true } });
-    assert.deepEqual(schema.methods.reset.post, { '': { $set: { count: 0, scores: [] }, $unset: { tags: true } } });
+    assert.deepEqual(schema.methods.reset.pre, {
+      'node.count': { $gt: 0 },
+      'node.scores': { $exists: true },
+    });
+    assert.deepEqual(schema.methods.reset.post, {
+      '': { $set: { count: 0, scores: [] }, $unset: { tags: true } },
+    });
     assert.equal(schema.methods.reset.description, 'Clears all accumulated data');
   });
 
@@ -448,7 +451,10 @@ describe('extract-schemas-oxc', () => {
 
   it('arrow-field with @read extracts kind="read" into methods', () => {
     assert.equal(schema.methods.shipArrow.kind, 'read');
-    assert.ok(!('shipArrow' in schema.properties), 'arrow-field method should not appear in properties');
+    assert.ok(
+      !('shipArrow' in schema.properties),
+      'arrow-field method should not appear in properties',
+    );
   });
 
   it('arrow-field with @write extracts kind="write"', () => {
@@ -542,7 +548,11 @@ describe('extract-schemas-oxc', () => {
     await generateSchemas([fixturesDir]);
 
     assert.equal(await fs.readFile(schemaFile, 'utf-8'), before);
-    assert.equal((await fs.stat(schemaFile)).mtimeMs, past.getTime(), 'file should not be rewritten when unchanged');
+    assert.equal(
+      (await fs.stat(schemaFile)).mtimeMs,
+      past.getTime(),
+      'file should not be rewritten when unchanged',
+    );
   });
 });
 
@@ -586,11 +596,15 @@ describe('extract-schemas-oxc: action and type rules', () => {
   }
 
   // Generation from source.ts and the other named files; returns the schema written for test.sample.
-  async function generated(source: string, others: Record<string, string> = {}): Promise<TypeSchema> {
+  async function generated(
+    source: string,
+    others: Record<string, string> = {},
+  ): Promise<TypeSchema> {
     const dir = await scratchDir('rule');
     dirs.push(dir);
     await fs.writeFile(path.join(dir, 'source.ts'), source);
-    for (const [name, text] of Object.entries(others)) await fs.writeFile(path.join(dir, name), text);
+    for (const [name, text] of Object.entries(others))
+      await fs.writeFile(path.join(dir, name), text);
     await generateSchemas([dir]);
     return JSON.parse(await fs.readFile(path.join(dir, 'schemas', 'test.sample.json'), 'utf-8'));
   }
@@ -599,21 +613,25 @@ describe('extract-schemas-oxc: action and type rules', () => {
     `${classDoc}\nclass Sample {\n${body}\n}\nregisterType('test.sample', Sample${opts && ', ' + opts});\n`;
 
   it("a class method's second parameter is the needs registerType declares for it, left out of the arguments", async () => {
-    const schema = await generated(registered(
-      `run(tag: string, deps: { order: { status: string } }) {}\nstop(tag: string) {}`,
-      '',
-      `{ needs: { run: ['order'] } }`,
-    ));
+    const schema = await generated(
+      registered(
+        `run(tag: string, deps: { order: { status: string } }) {}\nstop(tag: string) {}`,
+        '',
+        `{ needs: { run: ['order'] } }`,
+      ),
+    );
 
     assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'tag', type: 'string' }]);
   });
 
   it('needs declared for every action admit a needs parameter on each method', async () => {
-    const schema = await generated(registered(
-      `run(tag: string, deps: unknown) {}\nship = (tag: string, deps: unknown) => tag;`,
-      '',
-      `{ needs: { '*': ['order'] } }`,
-    ));
+    const schema = await generated(
+      registered(
+        `run(tag: string, deps: unknown) {}\nship = (tag: string, deps: unknown) => tag;`,
+        '',
+        `{ needs: { '*': ['order'] } }`,
+      ),
+    );
 
     assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'tag', type: 'string' }]);
     assert.deepEqual(schema.methods?.ship?.arguments, [{ name: 'tag', type: 'string' }]);
@@ -621,20 +639,33 @@ describe('extract-schemas-oxc: action and type rules', () => {
 
   it('a two-parameter method fails when registerType declares no needs for it', async () => {
     await refused(registered(`run(tag: string, prio: number) {}`));
-    await refused(registered(`run(tag: string, prio: number) {}\nstop() {}`, '', `{ needs: { stop: ['order'] } }`));
+    await refused(
+      registered(
+        `run(tag: string, prio: number) {}\nstop() {}`,
+        '',
+        `{ needs: { stop: ['order'] } }`,
+      ),
+    );
   });
 
   it("a register()ed handler's args type is read through a default value", async () => {
-    const schema = await generated(`register('test.sample', 'action:run', (ctx: unknown, params: { n?: number } = {}) => params);\n`);
+    const schema = await generated(
+      `register('test.sample', 'action:run', (ctx: unknown, params: { n?: number } = {}) => params);\n`,
+    );
 
-    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'params', type: 'object', properties: { n: { type: 'number' } } }]);
+    assert.deepEqual(schema.methods?.run?.arguments, [
+      { name: 'params', type: 'object', properties: { n: { type: 'number' } } },
+    ]);
   });
 
   it('a named registered handler retains its argument schema', async () => {
-    const schema = await generated(`export async function token(ctx: unknown, data: { displayName?: string }) { return { token: '' }; }
+    const schema =
+      await generated(`export async function token(ctx: unknown, data: { displayName?: string }) { return { token: '' }; }
 register('test.sample', 'action:run', token);
 `);
-    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'data', type: 'object', properties: { displayName: { type: 'string' } } }]);
+    assert.deepEqual(schema.methods?.run?.arguments, [
+      { name: 'data', type: 'object', properties: { displayName: { type: 'string' } } },
+    ]);
   });
 
   it('a named registered handler cannot add a second data parameter', async () => {
@@ -644,7 +675,11 @@ register('test.sample', 'action:run', run);
   });
 
   it('a streaming method with @post fails', async () => {
-    await refused(registered(`/** @post {"": {"$set": {"a": 1}}} */\nasync *run(): AsyncGenerator<string> { yield '' }`));
+    await refused(
+      registered(
+        `/** @post {"": {"$set": {"a": 1}}} */\nasync *run(): AsyncGenerator<string> { yield '' }`,
+      ),
+    );
   });
 
   it('a legacy @pre field list fails, naming the file', async () => {
@@ -652,28 +687,52 @@ register('test.sample', 'action:run', run);
   });
 
   it('a class method with a parameter after the needs fails', async () => {
-    await refused(registered(`run(tag: string, deps: unknown, prio: number) {}`, '', `{ needs: { run: ['order'] } }`));
+    await refused(
+      registered(
+        `run(tag: string, deps: unknown, prio: number) {}`,
+        '',
+        `{ needs: { run: ['order'] } }`,
+      ),
+    );
   });
 
   it('an arrow-field method with a parameter after the needs fails', async () => {
-    await refused(registered(`run = (tag: string, deps: unknown, prio: number) => tag;`, '', `{ needs: { '*': ['order'] } }`));
+    await refused(
+      registered(
+        `run = (tag: string, deps: unknown, prio: number) => tag;`,
+        '',
+        `{ needs: { '*': ['order'] } }`,
+      ),
+    );
   });
 
   it('a rest parameter fails', async () => {
     await refused(registered(`run(...tags: string[]) {}`));
-    await refused(registered(`run(tag: string, ...deps: unknown[]) {}`, '', `{ needs: { run: ['order'] } }`));
+    await refused(
+      registered(`run(tag: string, ...deps: unknown[]) {}`, '', `{ needs: { run: ['order'] } }`),
+    );
   });
 
   it('a register()ed action handler with two data parameters fails', async () => {
-    await refused(`register('test.sample', 'action:run', (ctx: unknown, tag: string, prio: number) => tag);\n`);
+    await refused(
+      `register('test.sample', 'action:run', (ctx: unknown, tag: string, prio: number) => tag);\n`,
+    );
   });
 
   it('a kind, @io, @pre or @post on a register()ed action fails', async () => {
     const run = `register('test.sample', 'action:run', (ctx: unknown) => 1);\n`;
 
-    for (const tags of ['@read', '@setuid', '@io', '@pre {"node.a": 1}', '@post {"": {"$set": {"a": 1}}}'])
+    for (const tags of [
+      '@read',
+      '@setuid',
+      '@io',
+      '@pre {"node.a": 1}',
+      '@post {"": {"$set": {"a": 1}}}',
+    ])
       await refused(`/** ${tags} */\n${run}`);
-    assert.deepEqual((await generated(`/** Runs the sample. */\n${run}`)).methods?.run, { arguments: [] });
+    assert.deepEqual((await generated(`/** Runs the sample. */\n${run}`)).methods?.run, {
+      arguments: [],
+    });
   });
 
   it('a @read method with @post fails', async () => {
@@ -697,7 +756,10 @@ register('test.sample', 'action:run', run);
   });
 
   it("a member of an imported type takes the JSDoc of its own file, not the importing file's at the same offset", async () => {
-    const source = registered(`opts: Opts = { mail: '' };\n/** @read */\nrun() {}`).replace(/^/, `import type { Opts } from './types';\n`);
+    const source = registered(`opts: Opts = { mail: '' };\n/** @read */\nrun() {}`).replace(
+      /^/,
+      `import type { Opts } from './types';\n`,
+    );
     const head = 'export type Opts = {\n  /** @format email */\n';
     const types = head + ' '.repeat(source.indexOf('run()') - head.length) + 'mail: string;\n};\n';
 
@@ -714,7 +776,10 @@ register('test.sample', 'action:run', run);
     const missing = path.join(await scratchDir('missing'), 'absent');
     dirs.push(path.dirname(missing));
 
-    await assert.rejects(() => generateSchemas([missing]), (err: unknown) => err instanceof Error && 'code' in err && err.code === 'ENOENT');
+    await assert.rejects(
+      () => generateSchemas([missing]),
+      (err: unknown) => err instanceof Error && 'code' in err && err.code === 'ENOENT',
+    );
   });
 });
 

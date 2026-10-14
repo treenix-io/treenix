@@ -17,13 +17,21 @@ import { openNativeDeployment, type NativeDeploymentConfig } from './native-depl
 
 /** Drain streaming pieces while the native HTTP client owns lane delivery. */
 async function finish(pending: Pending) {
-  for await (const _chunk of pending.chunks) {}
+  for await (const _chunk of pending.chunks) {
+  }
   return pending.outcome;
 }
 
 /** Start the genuine HTTP binding over the deployment's actual native session factory. */
-async function http(runtime: Awaited<ReturnType<typeof openNativeDeployment>>, credential?: Credential) {
-  const binding = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+async function http(
+  runtime: Awaited<ReturnType<typeof openNativeDeployment>>,
+  credential?: Credential,
+) {
+  const binding = createTwpHttpServer({
+    instance: runtime.instance,
+    allowedOrigins: [],
+    credentialTtlMs: 60_000,
+  });
   binding.server.listen(0, '127.0.0.1');
   await once(binding.server, 'listening');
   const address = binding.server.address();
@@ -31,45 +39,93 @@ async function http(runtime: Awaited<ReturnType<typeof openNativeDeployment>>, c
   const transport = await openTwpHttp({ url: `http://127.0.0.1:${address.port}`, credential });
   const client = createTwpClient(transport, { credential, close: () => transport.close() });
   const welcome = await client.ready;
-  return { client, welcome, async close() { client.close(); await binding.close(); } };
+  return {
+    client,
+    welcome,
+    async close() {
+      client.close();
+      await binding.close();
+    },
+  };
 }
 
 test('reopen authenticates configured admin for new module ownership and retains data', async () => {
   const temporary = new URL('../../../../temp/native-module-upgrade-data/', import.meta.url);
   await mkdir(temporary, { recursive: true });
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
-  const modules = [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }];
+  const modules = [
+    { id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href },
+  ];
   const config: NativeDeploymentConfig = {
-    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
-      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' } },
+    runtime: {
+      id: randomUUID(),
+      directory: join(directory, 'root'),
+      credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
+    },
     modules,
   };
   const fresh = await openNativeDeployment(config);
   const initial = await http(fresh, fresh.instance.setupCredential);
   try {
-    await finish(initial.client.commit({ changes: [{ op: 'put', node: { $path: '/retained', $type: 'boot.state', label: 'saved' } }] }));
-  } finally { await initial.close(); await fresh.close(); }
+    await finish(
+      initial.client.commit({
+        changes: [{ op: 'put', node: { $path: '/retained', $type: 'boot.state', label: 'saved' } }],
+      }),
+    );
+  } finally {
+    await initial.close();
+    await fresh.close();
+  }
 
-  const manifest: ModuleManifest = { id: 'native.upgrade-fixture', open: [], security: [], types: [{
-    name: 'upgrade.note', module: 'native.upgrade-fixture', security: 'ordinary', version: 0,
-    schema: { type: 'object', properties: { text: { type: 'string' } } }, actions: {},
-  }] };
+  const manifest: ModuleManifest = {
+    id: 'native.upgrade-fixture',
+    open: [],
+    security: [],
+    types: [
+      {
+        name: 'upgrade.note',
+        module: 'native.upgrade-fixture',
+        security: 'ordinary',
+        version: 0,
+        schema: { type: 'object', properties: { text: { type: 'string' } } },
+        actions: {},
+      },
+    ],
+  };
   const entry = join(directory, 'upgrade.mjs');
   await writeFile(entry, `export default () => ({ manifest: ${JSON.stringify(manifest)} });\n`);
-  const upgradedConfig = { ...config, modules: [...modules, { id: 'upgrade-fixture', entry: pathToFileURL(entry).href }] };
+  const upgradedConfig = {
+    ...config,
+    modules: [...modules, { id: 'upgrade-fixture', entry: pathToFileURL(entry).href }],
+  };
   const upgraded = await openNativeDeployment(upgradedConfig);
   const credential = upgraded.instance.setupCredential;
   assert.ok(credential);
   const installer = await http(upgraded, credential);
   try {
-    await finish(installer.client.commit({ changes: [{ op: 'put', node: { $path: '/upgraded', $type: 'upgrade.note', text: 'installed' } }] }));
+    await finish(
+      installer.client.commit({
+        changes: [
+          { op: 'put', node: { $path: '/upgraded', $type: 'upgrade.note', text: 'installed' } },
+        ],
+      }),
+    );
     const retained = (await installer.client.read({ node: '/retained' })).copies[0];
     assert.ok('node' in retained);
     assert.equal(retained.node.label, 'saved');
-  } finally { await installer.close(); await upgraded.close(); }
+  } finally {
+    await installer.close();
+    await upgraded.close();
+  }
 
-  const stable = await openNativeDeployment({ ...upgradedConfig, runtime: { ...config.runtime,
-    firstAdmin: { path: '/admin', name: 'admin', password: 'stale-password' } } });
+  const stable = await openNativeDeployment({
+    ...upgradedConfig,
+    runtime: {
+      ...config.runtime,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'stale-password' },
+    },
+  });
   assert.equal(stable.instance.setupCredential, undefined);
   const reader = await http(stable, credential);
   try {
@@ -78,22 +134,42 @@ test('reopen authenticates configured admin for new module ownership and retains
     assert.ok('node' in retained && 'node' in installed);
     assert.equal(retained.node.label, 'saved');
     assert.equal(installed.node.text, 'installed');
-  } finally { await reader.close(); await stable.close(); }
+  } finally {
+    await reader.close();
+    await stable.close();
+  }
 });
 
 test('full caller-visible type catalog fits default read limits across 306 module types', async () => {
   const temporary = new URL('../../../../temp/native-catalog-batch/', import.meta.url);
   await mkdir(temporary, { recursive: true });
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
-  const names = Array.from({ length: 306 }, (_, index) => `catalog.fixture${String(index).padStart(3, '0')}`);
-  const manifest: ModuleManifest = { id: 'catalog.fixture', open: [], security: [],
-    types: names.map(name => ({ name, module: 'catalog.fixture', security: 'ordinary', version: 0,
-      schema: { type: 'object', properties: {} }, actions: {} })) };
+  const names = Array.from(
+    { length: 306 },
+    (_, index) => `catalog.fixture${String(index).padStart(3, '0')}`,
+  );
+  const manifest: ModuleManifest = {
+    id: 'catalog.fixture',
+    open: [],
+    security: [],
+    types: names.map((name) => ({
+      name,
+      module: 'catalog.fixture',
+      security: 'ordinary',
+      version: 0,
+      schema: { type: 'object', properties: {} },
+      actions: {},
+    })),
+  };
   const entry = join(directory, 'inventory.mjs');
   await writeFile(entry, `export default () => ({ manifest: ${JSON.stringify(manifest)} });\n`);
   const runtime = await openNativeDeployment({
-    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
-      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' } },
+    runtime: {
+      id: randomUUID(),
+      directory: join(directory, 'root'),
+      credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
+    },
     modules: [
       { id: 'platform', entry: new URL('../mods/platform/kernel.ts', import.meta.url).href },
       { id: 'catalog.fixture', entry: pathToFileURL(entry).href },
@@ -102,32 +178,86 @@ test('full caller-visible type catalog fits default read limits across 306 modul
   assert.equal(runtime.instance.limits().readNodes, 1000);
   const admin = await http(runtime, runtime.instance.setupCredential);
   try {
-    await finish(admin.client.commit({ changes: [{ op: 'put', node: { $path: '/catalog', $type: 't.system' } }] }));
-    const catalog = (await admin.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome).value;
+    await finish(
+      admin.client.commit({
+        changes: [{ op: 'put', node: { $path: '/catalog', $type: 't.system' } }],
+      }),
+    );
+    const catalog = (
+      await admin.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome
+    ).value;
     assert.ok(Array.isArray(catalog));
-    assert.deepEqual(catalog.map(description => description.name).filter(name => name.startsWith('catalog.fixture')), names);
+    assert.deepEqual(
+      catalog
+        .map((description) => description.name)
+        .filter((name) => name.startsWith('catalog.fixture')),
+      names,
+    );
     const root = (await admin.client.read({ node: '/' })).copies[0];
     assert.ok('node' in root);
-    await finish(admin.client.commit({ changes: [
-      { op: 'patch', path: '/', ops: { $set: { $acl: [...root.node.$acl ?? [], { subject: { group: 'authenticated' }, grant: R }] } } },
-      { op: 'patch', path: `/sys/types/${names[1]}`, ops: { $set: { $acl: [{ subject: { group: 'authenticated' }, deny: R | W | A }] } } },
-      { op: 'put', node: { $path: '/auth/users/reader', $type: 't.user', name: 'reader', status: 'active',
-        '#groups': { $type: 't.groups', list: [] } } },
-    ] }));
+    await finish(
+      admin.client.commit({
+        changes: [
+          {
+            op: 'patch',
+            path: '/',
+            ops: {
+              $set: {
+                $acl: [
+                  ...(root.node.$acl ?? []),
+                  { subject: { group: 'authenticated' }, grant: R },
+                ],
+              },
+            },
+          },
+          {
+            op: 'patch',
+            path: `/sys/types/${names[1]}`,
+            ops: { $set: { $acl: [{ subject: { group: 'authenticated' }, deny: R | W | A }] } },
+          },
+          {
+            op: 'put',
+            node: {
+              $path: '/auth/users/reader',
+              $type: 't.user',
+              name: 'reader',
+              status: 'active',
+              '#groups': { $type: 't.groups', list: [] },
+            },
+          },
+        ],
+      }),
+    );
     const account = (await admin.client.read({ node: '/auth/users/reader' })).copies[0];
     assert.ok('node' in account);
     const issued = prepareCredential(account.node.$id, { expiresAt: Date.now() + 60_000 });
     await finish(admin.client.commit({ changes: [{ op: 'put', node: issued.node }] }));
     const reader = await http(runtime, issued.credential);
     try {
-      await assert.rejects(reader.client.act({ path: '/catalog', action: 'describe_type', args: { type: names[1] } }).outcome,
-      error => error instanceof KernelError && error.code === 'NOT_FOUND');
-      const visible = (await reader.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome).value;
+      await assert.rejects(
+        reader.client.act({ path: '/catalog', action: 'describe_type', args: { type: names[1] } })
+          .outcome,
+        (error) => error instanceof KernelError && error.code === 'NOT_FOUND',
+      );
+      const visible = (
+        await reader.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome
+      ).value;
       assert.ok(Array.isArray(visible));
-      assert.equal(visible.some(description => description.name === names[1]), false);
-      assert.equal(visible.some(description => description.name === names[0]), true);
-    } finally { await reader.close(); }
-  } finally { await admin.close(); await runtime.close(); }
+      assert.equal(
+        visible.some((description) => description.name === names[1]),
+        false,
+      );
+      assert.equal(
+        visible.some((description) => description.name === names[0]),
+        true,
+      );
+    } finally {
+      await reader.close();
+    }
+  } finally {
+    await admin.close();
+    await runtime.close();
+  }
 });
 
 test('fresh seeded service first mutation follows accepted mount preparation', async () => {
@@ -136,32 +266,69 @@ test('fresh seeded service first mutation follows accepted mount preparation', a
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
   await mkdir(join(directory, 'documents'));
   const runtime = await openNativeDeployment({
-    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+    runtime: {
+      id: randomUUID(),
+      directory: join(directory, 'root'),
+      credentialTtlMs: 60_000,
       firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
-      mountDirectories: { documents: join(directory, 'documents') } },
-    modules: [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }],
-    additionalModules: [{ id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href }],
-    seeds: { sources: [
-      { $path: '/sys/mods', $type: 't.dir' },
-      { $path: '/sys/mods/boot', $type: 't.dir' },
-      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
-    ], prefabs: [{ target: '/', source: {
-      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
-      nodes: [
-        { $path: 'sys/autostart', $type: 'boot.worker' },
-        { $path: 'sys/autostart/state', $type: 'boot.state', label: '' },
-        { $path: 'documents', $type: 't.mount-point',
-          '#groups': { $type: 't.groups', list: ['admins'] },
-          '#mount': { $type: 't.mount.rawfs', directory: 'documents', pattern: '', external: 'none' } },
-      ], grants: [{ executor: 'sys/autostart', target: 'sys/autostart', grant: R | W }],
-    } }] },
+      mountDirectories: { documents: join(directory, 'documents') },
+    },
+    modules: [
+      {
+        id: 'boot-fixture',
+        entry: new URL('./native-deployment-fixture.ts', import.meta.url).href,
+      },
+    ],
+    additionalModules: [
+      {
+        id: '@treenx/mods/prefab',
+        entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href,
+      },
+    ],
+    seeds: {
+      sources: [
+        { $path: '/sys/mods', $type: 't.dir' },
+        { $path: '/sys/mods/boot', $type: 't.dir' },
+        { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
+      ],
+      prefabs: [
+        {
+          target: '/',
+          source: {
+            $path: '/sys/mods/boot/prefabs/seed',
+            $type: 't.prefab',
+            mod: 'boot',
+            name: 'seed',
+            nodes: [
+              { $path: 'sys/autostart', $type: 'boot.worker' },
+              { $path: 'sys/autostart/state', $type: 'boot.state', label: '' },
+              {
+                $path: 'documents',
+                $type: 't.mount-point',
+                '#groups': { $type: 't.groups', list: ['admins'] },
+                '#mount': {
+                  $type: 't.mount.rawfs',
+                  directory: 'documents',
+                  pattern: '',
+                  external: 'none',
+                },
+              },
+            ],
+            grants: [{ executor: 'sys/autostart', target: 'sys/autostart', grant: R | W }],
+          },
+        },
+      ],
+    },
   });
   const connection = await http(runtime, runtime.instance.setupCredential);
   try {
     const state = (await connection.client.read({ node: '/sys/autostart/state' })).copies[0];
     assert.ok('node' in state);
     assert.equal(state.node.label, 'ecivres');
-  } finally { await connection.close(); await runtime.close(); }
+  } finally {
+    await connection.close();
+    await runtime.close();
+  }
 });
 
 test('fresh seeded filesystem mounts preserve the public HTTP key for the first action', async () => {
@@ -170,37 +337,84 @@ test('fresh seeded filesystem mounts preserve the public HTTP key for the first 
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
   await mkdir(join(directory, 'documents'));
   const runtime = await openNativeDeployment({
-    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+    runtime: {
+      id: randomUUID(),
+      directory: join(directory, 'root'),
+      credentialTtlMs: 60_000,
       firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
-      mountDirectories: { documents: join(directory, 'documents') } },
-    modules: [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }],
-    additionalModules: [{ id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href }],
-    seeds: { sources: [
-      { $path: '/sys/mods', $type: 't.dir' },
-      { $path: '/sys/mods/boot', $type: 't.dir' },
-      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
-    ], prefabs: [{ target: '/', source: {
-      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
-      nodes: [
-        { $path: 'worker', $type: 'boot.worker' },
-        { $path: 'worker/state', $type: 'boot.state', label: '' },
-        { $path: 'documents', $type: 't.mount-point',
-          '#groups': { $type: 't.groups', list: ['admins'] },
-          '#mount': { $type: 't.mount.rawfs', directory: 'documents', pattern: '', external: 'none' } },
+      mountDirectories: { documents: join(directory, 'documents') },
+    },
+    modules: [
+      {
+        id: 'boot-fixture',
+        entry: new URL('./native-deployment-fixture.ts', import.meta.url).href,
+      },
+    ],
+    additionalModules: [
+      {
+        id: '@treenx/mods/prefab',
+        entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href,
+      },
+    ],
+    seeds: {
+      sources: [
+        { $path: '/sys/mods', $type: 't.dir' },
+        { $path: '/sys/mods/boot', $type: 't.dir' },
+        { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
       ],
-    } }] },
+      prefabs: [
+        {
+          target: '/',
+          source: {
+            $path: '/sys/mods/boot/prefabs/seed',
+            $type: 't.prefab',
+            mod: 'boot',
+            name: 'seed',
+            nodes: [
+              { $path: 'worker', $type: 'boot.worker' },
+              { $path: 'worker/state', $type: 'boot.state', label: '' },
+              {
+                $path: 'documents',
+                $type: 't.mount-point',
+                '#groups': { $type: 't.groups', list: ['admins'] },
+                '#mount': {
+                  $type: 't.mount.rawfs',
+                  directory: 'documents',
+                  pattern: '',
+                  external: 'none',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
   });
   const connection = await http(runtime, runtime.instance.setupCredential);
   try {
     const before = (await connection.client.read({ node: '/worker/state' })).copies[0];
     assert.ok('node' in before);
     assert.equal(before.node.label, '');
-    assert.equal((await finish(connection.client.act({ path: '/worker', action: 'reverse', args: 'first',
-      opId: connection.client.key() }))).value, 'tsrif');
+    assert.equal(
+      (
+        await finish(
+          connection.client.act({
+            path: '/worker',
+            action: 'reverse',
+            args: 'first',
+            opId: connection.client.key(),
+          }),
+        )
+      ).value,
+      'tsrif',
+    );
     const after = (await connection.client.read({ node: '/worker/state' })).copies[0];
     assert.ok('node' in after);
     assert.equal(after.node.label, 'tsrif');
-  } finally { await connection.close(); await runtime.close(); }
+  } finally {
+    await connection.close();
+    await runtime.close();
+  }
 });
 
 test('fresh seeded mount declarations retain accepted revisions after prefab grants', async () => {
@@ -209,44 +423,97 @@ test('fresh seeded mount declarations retain accepted revisions after prefab gra
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
   await mkdir(join(directory, 'documents'));
   const runtime = await openNativeDeployment({
-    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+    runtime: {
+      id: randomUUID(),
+      directory: join(directory, 'root'),
+      credentialTtlMs: 60_000,
       firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
-      mountDirectories: { documents: join(directory, 'documents') } },
-    modules: [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }],
-    additionalModules: [{ id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href }],
-    seeds: { sources: [
-      { $path: '/sys/mods', $type: 't.dir' },
-      { $path: '/sys/mods/boot', $type: 't.dir' },
-      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
-    ], prefabs: [{ target: '/', source: {
-      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
-      grants: [{ executor: 'worker', target: 'documents', grant: R }],
-      nodes: [
-        { $path: 'worker', $type: 'boot.worker' },
-        { $path: 'worker/state', $type: 'boot.state', label: '' },
-        { $path: 'documents', $type: 't.mount-point',
-          '#groups': { $type: 't.groups', list: ['admins'] },
-          '#mount': { $type: 't.mount.rawfs', directory: 'documents', pattern: '', external: 'none' } },
+      mountDirectories: { documents: join(directory, 'documents') },
+    },
+    modules: [
+      {
+        id: 'boot-fixture',
+        entry: new URL('./native-deployment-fixture.ts', import.meta.url).href,
+      },
+    ],
+    additionalModules: [
+      {
+        id: '@treenx/mods/prefab',
+        entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href,
+      },
+    ],
+    seeds: {
+      sources: [
+        { $path: '/sys/mods', $type: 't.dir' },
+        { $path: '/sys/mods/boot', $type: 't.dir' },
+        { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
       ],
-    } }] },
+      prefabs: [
+        {
+          target: '/',
+          source: {
+            $path: '/sys/mods/boot/prefabs/seed',
+            $type: 't.prefab',
+            mod: 'boot',
+            name: 'seed',
+            grants: [{ executor: 'worker', target: 'documents', grant: R }],
+            nodes: [
+              { $path: 'worker', $type: 'boot.worker' },
+              { $path: 'worker/state', $type: 'boot.state', label: '' },
+              {
+                $path: 'documents',
+                $type: 't.mount-point',
+                '#groups': { $type: 't.groups', list: ['admins'] },
+                '#mount': {
+                  $type: 't.mount.rawfs',
+                  directory: 'documents',
+                  pattern: '',
+                  external: 'none',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
   });
   const connection = await http(runtime, runtime.instance.setupCredential);
   try {
     const worker = (await connection.client.read({ node: '/worker' })).copies[0];
     const declaration = (await connection.client.read({ node: '/documents' })).copies[0];
     assert.ok('node' in worker && 'node' in declaration);
-    assert.ok(declaration.node.$acl?.some(entry =>
-      'group' in entry.subject && entry.subject.group === `n:${worker.node.$id}`
-      && 'grant' in entry && (entry.grant & R) === R));
+    assert.ok(
+      declaration.node.$acl?.some(
+        (entry) =>
+          'group' in entry.subject &&
+          entry.subject.group === `n:${worker.node.$id}` &&
+          'grant' in entry &&
+          (entry.grant & R) === R,
+      ),
+    );
     const before = (await connection.client.read({ node: '/worker/state' })).copies[0];
     assert.ok('node' in before);
     assert.equal(before.node.label, '');
-    assert.equal((await finish(connection.client.act({ path: '/worker', action: 'reverse', args: 'first',
-      opId: connection.client.key() }))).value, 'tsrif');
+    assert.equal(
+      (
+        await finish(
+          connection.client.act({
+            path: '/worker',
+            action: 'reverse',
+            args: 'first',
+            opId: connection.client.key(),
+          }),
+        )
+      ).value,
+      'tsrif',
+    );
     const after = (await connection.client.read({ node: '/worker/state' })).copies[0];
     assert.ok('node' in after);
     assert.equal(after.node.label, 'tsrif');
-  } finally { await connection.close(); await runtime.close(); }
+  } finally {
+    await connection.close();
+    await runtime.close();
+  }
 });
 
 test('native deployment cold boots accepted seeds, HTTP actions and an owned service, then reopens unchanged seeds', async () => {
@@ -254,22 +521,46 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
   await mkdir(temporary, { recursive: true });
   const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
   const config: NativeDeploymentConfig = {
-    runtime: { id: 'native-boot', directory, credentialTtlMs: 60_000,
-      firstAdmin: { path: '/admin', name: 'admin', password: 'native-boot-password' } },
+    runtime: {
+      id: 'native-boot',
+      directory,
+      credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'native-boot-password' },
+    },
     modules: [
-      { id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href },
+      {
+        id: 'boot-fixture',
+        entry: new URL('./native-deployment-fixture.ts', import.meta.url).href,
+      },
     ],
     additionalModules: [
-      { id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href },
+      {
+        id: '@treenx/mods/prefab',
+        entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href,
+      },
     ],
-    seeds: { sources: [
-      { $path: '/sys/mods', $type: 't.dir' },
-      { $path: '/sys/mods/boot', $type: 't.dir' },
-      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
-    ], prefabs: [{ target: '/worker', source: {
-      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
-      nodes: [{ $path: '.', $type: 'boot.worker' }, { $path: 'state', $type: 'boot.state', label: '' }],
-    } }] },
+    seeds: {
+      sources: [
+        { $path: '/sys/mods', $type: 't.dir' },
+        { $path: '/sys/mods/boot', $type: 't.dir' },
+        { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
+      ],
+      prefabs: [
+        {
+          target: '/worker',
+          source: {
+            $path: '/sys/mods/boot/prefabs/seed',
+            $type: 't.prefab',
+            mod: 'boot',
+            name: 'seed',
+            nodes: [
+              { $path: '.', $type: 'boot.worker' },
+              { $path: 'state', $type: 'boot.state', label: '' },
+            ],
+          },
+        },
+      ],
+    },
   };
   const runtime = await openNativeDeployment(config);
   assert.ok(runtime.instance.setupCredential);
@@ -283,20 +574,46 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
     const initial = (await first.client.read({ node: '/worker/state' })).copies[0];
     if ('error' in initial) throw initial.error;
     assert.equal(initial.node.label, '');
-    assert.equal((await finish(first.client.act({ path: '/worker', action: 'reverse', args: 'action' }))).value, 'noitca');
+    assert.equal(
+      (await finish(first.client.act({ path: '/worker', action: 'reverse', args: 'action' })))
+        .value,
+      'noitca',
+    );
     const executor = (await first.client.read({ node: '/worker' })).copies[0];
     if ('error' in executor) throw executor.error;
-    await finish(first.client.commit({ expect: { nodes: [{ path: '/worker', rev: executor.node.$rev }] }, changes: [{ op: 'patch', path: '/worker', ops: { $set: {
-      $acl: [{ subject: { group: `n:${identity}` }, grant: R | W }],
-    } } }] }));
-    await finish(first.client.commit({ changes: [{ op: 'move', from: '/worker', to: '/sys/autostart' }] }));
+    await finish(
+      first.client.commit({
+        expect: { nodes: [{ path: '/worker', rev: executor.node.$rev }] },
+        changes: [
+          {
+            op: 'patch',
+            path: '/worker',
+            ops: {
+              $set: {
+                $acl: [{ subject: { group: `n:${identity}` }, grant: R | W }],
+              },
+            },
+          },
+        ],
+      }),
+    );
+    await finish(
+      first.client.commit({ changes: [{ op: 'move', from: '/worker', to: '/sys/autostart' }] }),
+    );
     const completed = new Promise<void>((resolve, reject) => {
-      const subscription = first.client.sub({ node: '/sys/autostart/state' }, () => {
-        const copy = first.client.cache.at('/sys/autostart/state');
-        if (copy === undefined) return;
-        if ('error' in copy) { reject(copy.error); return; }
-        if (copy.node.label === 'ecivres') resolve();
-      }, reject);
+      const subscription = first.client.sub(
+        { node: '/sys/autostart/state' },
+        () => {
+          const copy = first.client.cache.at('/sys/autostart/state');
+          if (copy === undefined) return;
+          if ('error' in copy) {
+            reject(copy.error);
+            return;
+          }
+          if (copy.node.label === 'ecivres') resolve();
+        },
+        reject,
+      );
       subscription.ready.catch(reject);
     });
     await completed;
@@ -306,9 +623,17 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
     const state = (await first.client.read({ node: '/sys/autostart/state' })).copies[0];
     if ('error' in state) throw state.error;
     assert.equal(state.node.label, 'ecivres');
-    await finish(first.client.commit({ changes: [{ op: 'move', from: '/sys/autostart', to: '/worker' }] }));
-  } finally { await first.close(); await runtime.close(); }
-  const reopened = await openNativeDeployment({ ...config, runtime: { ...config.runtime, installerCredential: credential } });
+    await finish(
+      first.client.commit({ changes: [{ op: 'move', from: '/sys/autostart', to: '/worker' }] }),
+    );
+  } finally {
+    await first.close();
+    await runtime.close();
+  }
+  const reopened = await openNativeDeployment({
+    ...config,
+    runtime: { ...config.runtime, installerCredential: credential },
+  });
   const second = await http(reopened, credential);
   try {
     assert.notEqual(second.welcome.intake, first.welcome.intake);
@@ -318,9 +643,11 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
     const state = (await second.client.read({ node: '/worker/state' })).copies[0];
     if ('error' in state) throw state.error;
     assert.equal(state.node.label, 'ecivres');
-  } finally { await second.close(); await reopened.close(); }
+  } finally {
+    await second.close();
+    await reopened.close();
+  }
 });
-
 
 /** Repeated compiled imports must bind each actual service to its own deployment HTTP lifetime. */
 test('native module factories bind independent MCP route owners', async () => {
@@ -330,15 +657,31 @@ test('native module factories bind independent MCP route owners', async () => {
   ];
   async function deployment() {
     const directory = await mkdtemp(resolve('temp/native-mcp-deployment-'));
-    const runtime = await openNativeDeployment({ runtime: { id: randomUUID(), directory, credentialTtlMs: 60_000,
-      firstAdmin: { path: '/admin', name: 'admin', password: 'mcp-deployment-password' } }, modules });
+    const runtime = await openNativeDeployment({
+      runtime: {
+        id: randomUUID(),
+        directory,
+        credentialTtlMs: 60_000,
+        firstAdmin: { path: '/admin', name: 'admin', password: 'mcp-deployment-password' },
+      },
+      modules,
+    });
     const credential = runtime.instance.setupCredential;
     assert.ok(credential);
     const session = await runtime.instance.openSession(credential);
-    const delivery = (async () => { for await (const _frame of session.lane) {} })();
-    const key = () => ({ epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() });
+    const delivery = (async () => {
+      for await (const _frame of session.lane) {
+      }
+    })();
+    const key = () => ({
+      epoch: runtime.instance.writer.intake.epoch,
+      time: Date.now(),
+      nonce: randomUUID(),
+    });
     let registeredResolve = () => {};
-    const registered = new Promise<void>(resolve => { registeredResolve = resolve; });
+    const registered = new Promise<void>((resolve) => {
+      registeredResolve = resolve;
+    });
     const register = runtime.httpRoutes.register;
     runtime.httpRoutes.register = (path, handler) => {
       const retire = register(path, handler);
@@ -346,29 +689,70 @@ test('native module factories bind independent MCP route owners', async () => {
       return retire;
     };
     try {
-      await session.commit({ opId: key(), changes: [
-        { op: 'put', node: { $path: '/sys/mcp', $type: 't.dir' } },
-        { op: 'put', node: { $path: '/sys/mcp/catalog', $type: 't.system' } },
-        { op: 'put', node: { $path: '/data', $type: 't.dir' } },
-        { op: 'put', node: { $path: '/mcp-service', $type: 'mcp.server', url: '/mcp', systemPath: '/sys/mcp/catalog' } },
-      ] }).outcome;
+      await session.commit({
+        opId: key(),
+        changes: [
+          { op: 'put', node: { $path: '/sys/mcp', $type: 't.dir' } },
+          { op: 'put', node: { $path: '/sys/mcp/catalog', $type: 't.system' } },
+          { op: 'put', node: { $path: '/data', $type: 't.dir' } },
+          {
+            op: 'put',
+            node: {
+              $path: '/mcp-service',
+              $type: 'mcp.server',
+              url: '/mcp',
+              systemPath: '/sys/mcp/catalog',
+            },
+          },
+        ],
+      }).outcome;
       const copy = (await session.read({ node: '/mcp-service' })).copies[0];
       if ('error' in copy) throw copy.error;
-      await session.commit({ opId: key(), expect: { nodes: [{ path: copy.node.$path, rev: copy.node.$rev }] }, changes: [
-        { op: 'patch', path: copy.node.$path, ops: { $set: { $acl: [{ subject: { group: `n:${copy.node.$id}` }, grant: R }] } } },
-      ] }).outcome;
-      await session.commit({ opId: key(), changes: [{ op: 'move', from: copy.node.$path, to: '/sys/autostart' }] }).outcome;
+      await session.commit({
+        opId: key(),
+        expect: { nodes: [{ path: copy.node.$path, rev: copy.node.$rev }] },
+        changes: [
+          {
+            op: 'patch',
+            path: copy.node.$path,
+            ops: { $set: { $acl: [{ subject: { group: `n:${copy.node.$id}` }, grant: R }] } },
+          },
+        ],
+      }).outcome;
+      await session.commit({
+        opId: key(),
+        changes: [{ op: 'move', from: copy.node.$path, to: '/sys/autostart' }],
+      }).outcome;
       await registered;
-    } finally { session.close(); await delivery; }
-    const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: [], credentialTtlMs: 60_000 });
+    } finally {
+      session.close();
+      await delivery;
+    }
+    const binding = createTwpHttpServer({
+      instance: runtime.instance,
+      routes: runtime.httpRoutes,
+      allowedOrigins: [],
+      credentialTtlMs: 60_000,
+    });
     binding.server.listen(0, '127.0.0.1');
     await once(binding.server, 'listening');
     const address = binding.server.address();
     if (address === null || typeof address === 'string') throw new Error('Missing HTTP address');
     const client = new Client({ name: 'deployment-test', version: '1.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`),
-      { requestInit: { headers: { authorization: `Bearer ${credential.token}` } } }));
-    return { runtime, client, async close() { await client.close(); await binding.close(); await runtime.close(); } };
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${credential.token}` } },
+      }),
+    );
+    return {
+      runtime,
+      client,
+      async close() {
+        await client.close();
+        await binding.close();
+        await runtime.close();
+      },
+    };
   }
   const first = await deployment();
   let firstClosed = false;
@@ -376,11 +760,28 @@ test('native module factories bind independent MCP route owners', async () => {
     const second = await deployment();
     try {
       assert.notEqual(first.runtime.httpRoutes, second.runtime.httpRoutes);
-      assert.equal((await first.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
-      assert.equal((await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
-      await first.close(); firstClosed = true;
-      assert.equal((await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
-      assert.equal((await second.client.callTool({ name: 'catalog', arguments: {} })).isError, undefined);
-    } finally { await second.close(); }
-  } finally { if (!firstClosed) await first.close(); }
+      assert.equal(
+        (await first.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError,
+        undefined,
+      );
+      assert.equal(
+        (await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError,
+        undefined,
+      );
+      await first.close();
+      firstClosed = true;
+      assert.equal(
+        (await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError,
+        undefined,
+      );
+      assert.equal(
+        (await second.client.callTool({ name: 'catalog', arguments: {} })).isError,
+        undefined,
+      );
+    } finally {
+      await second.close();
+    }
+  } finally {
+    if (!firstClosed) await first.close();
+  }
 });

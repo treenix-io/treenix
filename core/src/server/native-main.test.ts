@@ -1,164 +1,220 @@
-import assert from 'node:assert/strict'
-import { fork, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { join, relative, resolve } from 'node:path'
-import { afterEach, describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
+import assert from 'node:assert/strict';
+import { fork, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { join, relative, resolve } from 'node:path';
+import { afterEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { openNativeRuntime } from '#kernel/runtime'
-import { drainSession } from '#kernel/session-delivery'
+import { openNativeRuntime } from '#kernel/runtime';
+import { drainSession } from '#kernel/session-delivery';
 
-import { openTwpHttp } from '#client/http-twp'
-import { createTwpClient } from '#client/twp'
-import type { Credential } from '#kernel/types'
-import { isRecord } from '#util/is-record'
+import { openTwpHttp } from '#client/http-twp';
+import { createTwpClient } from '#client/twp';
+import type { Credential } from '#kernel/types';
+import { isRecord } from '#util/is-record';
 
-const children: ChildProcess[] = []
+const children: ChildProcess[] = [];
 
 /** Keep configuration and storage evidence in independent test directories. */
 async function scratch(): Promise<string> {
-  const parent = resolve('../../temp/native-cli-mount-config')
-  await mkdir(parent, { recursive: true })
-  return mkdtemp(join(parent, 'dataset-'))
+  const parent = resolve('../../temp/native-cli-mount-config');
+  await mkdir(parent, { recursive: true });
+  return mkdtemp(join(parent, 'dataset-'));
 }
 
 /** Launch the actual CLI with bounded owned process lifetime and structured error observation. */
 function run(configPath: string, deployment?: string) {
   const args = deployment === undefined ? [configPath] : [configPath, '--deployment', deployment];
-  const child = fork(fileURLToPath(new URL('./native-main-process-fixture.ts', import.meta.url)), args, {
-    execArgv: ['--conditions=development', '--import', 'tsx'],
-    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-    signal: AbortSignal.timeout(10_000),
-    env: { ...process.env, NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
-  })
-  children.push(child)
-  let stderr = ''
-  assert.ok(child.stderr)
-  child.stderr.on('data', data => { stderr += data.toString() })
-  const exited = once(child, 'exit')
-  return { child, exited, stderr: () => stderr }
+  const child = fork(
+    fileURLToPath(new URL('./native-main-process-fixture.ts', import.meta.url)),
+    args,
+    {
+      execArgv: ['--conditions=development', '--import', 'tsx'],
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      signal: AbortSignal.timeout(10_000),
+      env: { ...process.env, NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
+    },
+  );
+  children.push(child);
+  let stderr = '';
+  assert.ok(child.stderr);
+  child.stderr.on('data', (data) => {
+    stderr += data.toString();
+  });
+  const exited = once(child, 'exit');
+  return { child, exited, stderr: () => stderr };
 }
 
 /** Make early process termination fail at its source rather than hanging for a message. */
 async function report(running: ReturnType<typeof run>): Promise<Record<string, unknown>> {
   const message = await Promise.race([
     once(running.child, 'message'),
-    running.exited.then(([code]) => { throw new Error(`CLI exited before reporting: ${code}: ${running.stderr()}`) }),
-  ])
-  const value: unknown = message[0]
-  assert.ok(isRecord(value))
-  return value
+    running.exited.then(([code]) => {
+      throw new Error(`CLI exited before reporting: ${code}: ${running.stderr()}`);
+    }),
+  ]);
+  const value: unknown = message[0];
+  assert.ok(isRecord(value));
+  return value;
 }
 
 /** Resolve only a genuine listen report, preserving startup errors as failures. */
 async function start(configPath: string, deployment?: string) {
-  const running = run(configPath, deployment)
-  const message = await report(running)
-  assert.equal(message.type, 'info', running.stderr())
-  assert.ok(Array.isArray(message.values) && isRecord(message.values[1]))
-  assert.equal(typeof message.values[1].port, 'number')
-  const address = `http://127.0.0.1:${message.values[1].port}`
+  const running = run(configPath, deployment);
+  const message = await report(running);
+  assert.equal(message.type, 'info', running.stderr());
+  assert.ok(Array.isArray(message.values) && isRecord(message.values[1]));
+  assert.equal(typeof message.values[1].port, 'number');
+  const address = `http://127.0.0.1:${message.values[1].port}`;
 
   return {
     address,
     async close(): Promise<void> {
-      assert.equal(running.child.kill('SIGTERM'), true)
-      assert.deepEqual(await running.exited, [0, null], running.stderr())
-      assert.equal(running.stderr(), '')
+      assert.equal(running.child.kill('SIGTERM'), true);
+      assert.deepEqual(await running.exited, [0, null], running.stderr());
+      assert.equal(running.stderr(), '');
     },
-  }
+  };
 }
 
 /** Authenticate through the real native credential endpoint. */
 async function login(address: string): Promise<Credential> {
   const response = await fetch(`${address}/auth/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account: '/admin', password: 'cli-password' }),
     signal: AbortSignal.timeout(5_000),
-  })
-  assert.equal(response.status, 200)
-  const value: unknown = await response.json()
-  assert.ok(isRecord(value) && typeof value.token === 'string')
-  return { token: value.token }
+  });
+  assert.equal(response.status, 200);
+  const value: unknown = await response.json();
+  assert.ok(isRecord(value) && typeof value.token === 'string');
+  return { token: value.token };
 }
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) {
-      const exited = once(child, 'exit')
-      child.kill('SIGTERM')
-      await exited
+      const exited = once(child, 'exit');
+      child.kill('SIGTERM');
+      await exited;
     }
   }
-})
+});
 
 describe('native CLI mount directory configuration', { timeout: 45_000 }, () => {
   it('rejects malformed optional capabilities as INVALID before acquiring root storage', async () => {
     for (const mountDirectories of [null, [], 'data', { data: 1 }, { data: '' }, { data: null }]) {
-      const directory = await scratch()
-      const configPath = join(directory, 'config.json')
-      await writeFile(configPath, JSON.stringify({ id: 'cli-invalid', directory: './root', credentialTtlMs: 60_000,
-        allowedOrigins: [], port: 0, firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' }, mountDirectories }))
-      const running = run(configPath)
-      const error = await report(running)
+      const directory = await scratch();
+      const configPath = join(directory, 'config.json');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          id: 'cli-invalid',
+          directory: './root',
+          credentialTtlMs: 60_000,
+          allowedOrigins: [],
+          port: 0,
+          firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
+          mountDirectories,
+        }),
+      );
+      const running = run(configPath);
+      const error = await report(running);
 
-      assert.equal(error.type, 'error')
-      assert.equal(error.code, 'INVALID')
-      assert.deepEqual(await running.exited, [1, null])
-      assert.deepEqual(await readdir(directory), ['config.json'])
+      assert.equal(error.type, 'error');
+      assert.equal(error.code, 'INVALID');
+      assert.deepEqual(await running.exited, [1, null]);
+      assert.deepEqual(await readdir(directory), ['config.json']);
     }
-  })
+  });
 
   it('binds a relative host directory through a genuine declaring-node mount after CLI restart', async () => {
-    const directory = await scratch()
-    const configuration = join(directory, 'configuration')
-    const hostData = join(directory, 'host-data')
-    await mkdir(configuration)
-    await mkdir(hostData)
-    await writeFile(join(hostData, 'doc.json'), JSON.stringify({ $type: 't.dir', marker: 'physical-data' }))
-    const configPath = join(configuration, 'config.json')
-    await writeFile(configPath, JSON.stringify({ id: 'cli-mounted', directory: '../root', credentialTtlMs: 60_000,
-      allowedOrigins: [], port: 0, firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
-      mountDirectories: { data: '../host-data' } }))
+    const directory = await scratch();
+    const configuration = join(directory, 'configuration');
+    const hostData = join(directory, 'host-data');
+    await mkdir(configuration);
+    await mkdir(hostData);
+    await writeFile(
+      join(hostData, 'doc.json'),
+      JSON.stringify({ $type: 't.dir', marker: 'physical-data' }),
+    );
+    const configPath = join(configuration, 'config.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        id: 'cli-mounted',
+        directory: '../root',
+        credentialTtlMs: 60_000,
+        allowedOrigins: [],
+        port: 0,
+        firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
+        mountDirectories: { data: '../host-data' },
+      }),
+    );
 
-    const first = await start(configPath)
-    const connection = await openTwpHttp({ url: first.address, credential: await login(first.address) })
-    const errors: unknown[] = []
-    const client = createTwpClient(connection, { close: connection.close, onError: error => errors.push(error) })
-    await client.ready
+    const first = await start(configPath);
+    const connection = await openTwpHttp({
+      url: first.address,
+      credential: await login(first.address),
+    });
+    const errors: unknown[] = [];
+    const client = createTwpClient(connection, {
+      close: connection.close,
+      onError: (error) => errors.push(error),
+    });
+    await client.ready;
     try {
-      const accepted = await client.commit({ changes: [{ op: 'put', node: { $path: '/data', $type: 't.dir',
-        '#mount': { $type: 't.mount.fs', pattern: '', directory: 'data', external: 'none' },
-        '#groups': { $type: 't.groups', list: ['admins'] } } }] }).outcome
-      assert.ok(accepted.pos)
-      assert.equal(errors.length, 0)
+      const accepted = await client.commit({
+        changes: [
+          {
+            op: 'put',
+            node: {
+              $path: '/data',
+              $type: 't.dir',
+              '#mount': { $type: 't.mount.fs', pattern: '', directory: 'data', external: 'none' },
+              '#groups': { $type: 't.groups', list: ['admins'] },
+            },
+          },
+        ],
+      }).outcome;
+      assert.ok(accepted.pos);
+      assert.equal(errors.length, 0);
     } finally {
-      client.close()
-      await first.close()
+      client.close();
+      await first.close();
     }
 
-    const second = await start(configPath)
-    const reopenedConnection = await openTwpHttp({ url: second.address, credential: await login(second.address) })
-    const reopened = createTwpClient(reopenedConnection, { close: reopenedConnection.close, onError: error => errors.push(error) })
-    await reopened.ready
+    const second = await start(configPath);
+    const reopenedConnection = await openTwpHttp({
+      url: second.address,
+      credential: await login(second.address),
+    });
+    const reopened = createTwpClient(reopenedConnection, {
+      close: reopenedConnection.close,
+      onError: (error) => errors.push(error),
+    });
+    await reopened.ready;
     try {
-      const result = await reopened.read({ node: '/data/doc' })
-      assert.equal(result.copies.length, 1)
-      const copy = result.copies[0]
-      assert.ok('node' in copy)
-      assert.equal(copy.node.$id, 'p:/data/doc')
-      assert.equal(copy.node.marker, 'physical-data')
-      assert.equal(errors.length, 0)
-      assert.deepEqual(JSON.parse(await readFile(join(hostData, 'doc.json'), 'utf8')), { $type: 't.dir', marker: 'physical-data' })
-      assert.ok((await readdir(hostData)).includes('.treenix'))
+      const result = await reopened.read({ node: '/data/doc' });
+      assert.equal(result.copies.length, 1);
+      const copy = result.copies[0];
+      assert.ok('node' in copy);
+      assert.equal(copy.node.$id, 'p:/data/doc');
+      assert.equal(copy.node.marker, 'physical-data');
+      assert.equal(errors.length, 0);
+      assert.deepEqual(JSON.parse(await readFile(join(hostData, 'doc.json'), 'utf8')), {
+        $type: 't.dir',
+        marker: 'physical-data',
+      });
+      assert.ok((await readdir(hostData)).includes('.treenix'));
     } finally {
-      reopened.close()
-      await second.close()
+      reopened.close();
+      await second.close();
     }
-  })
-})
+  });
+});
 
 describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
   it('rejects malformed deployment entries before acquiring persistent resources', async () => {
@@ -291,14 +347,25 @@ describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
   });
 });
 
-
 describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
   it('rejects a malformed readonly base capability before acquiring persistent resources', async () => {
     for (const baseDirectory of [null, 1, '']) {
-      const directory = await scratch(), configPath = join(directory, 'config.json');
-      await writeFile(configPath, JSON.stringify({ id: 'cli-base-invalid', directory: './work', baseDirectory,
-        credentialTtlMs: 60_000, allowedOrigins: [], modules: [], port: 0 }));
-      const running = run(configPath), error = await report(running);
+      const directory = await scratch(),
+        configPath = join(directory, 'config.json');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          id: 'cli-base-invalid',
+          directory: './work',
+          baseDirectory,
+          credentialTtlMs: 60_000,
+          allowedOrigins: [],
+          modules: [],
+          port: 0,
+        }),
+      );
+      const running = run(configPath),
+        error = await report(running);
       assert.equal(error.type, 'error');
       assert.equal(error.code, 'INVALID');
       assert.deepEqual(await running.exited, [1, null]);
@@ -307,42 +374,98 @@ describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
   });
 
   it('boots the root.json overlay through the normal launcher across upper writes and restart', async () => {
-    const directory = await scratch(), configuration = join(directory, 'configuration'), base = join(directory, 'base');
+    const directory = await scratch(),
+      configuration = join(directory, 'configuration'),
+      base = join(directory, 'base');
     await mkdir(configuration);
-    const prepared = await openNativeRuntime({ id: 'cli-base', directory: base, credentialTtlMs: 60_000, modules: [],
-      firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' } });
+    const prepared = await openNativeRuntime({
+      id: 'cli-base',
+      directory: base,
+      credentialTtlMs: 60_000,
+      modules: [],
+      firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
+    });
     assert.ok(prepared.instance.setupCredential);
-    const session = await prepared.instance.openSession(prepared.instance.setupCredential), delivery = drainSession(session);
+    const session = await prepared.instance.openSession(prepared.instance.setupCredential),
+      delivery = drainSession(session);
     let identity: string;
     try {
-      await session.commit({ opId: { epoch: prepared.instance.writer.intake.epoch, time: Date.now(), nonce: crypto.randomUUID() },
-        changes: [{ op: 'put', node: { $path: '/doc', $type: 't.dir', count: 1 } }] }).outcome;
+      await session.commit({
+        opId: {
+          epoch: prepared.instance.writer.intake.epoch,
+          time: Date.now(),
+          nonce: crypto.randomUUID(),
+        },
+        changes: [{ op: 'put', node: { $path: '/doc', $type: 't.dir', count: 1 } }],
+      }).outcome;
       const copy = (await session.read({ node: '/doc' })).copies[0];
       if ('error' in copy) throw copy.error;
       identity = copy.node.$id;
-    } finally { session.close(); await delivery; await prepared.close(); }
-    const before = await readFile(join(base, 'doc', '$'), 'utf8'), configPath = join(configuration, 'config.json');
+    } finally {
+      session.close();
+      await delivery;
+      await prepared.close();
+    }
+    const before = await readFile(join(base, 'doc', '$'), 'utf8'),
+      configPath = join(configuration, 'config.json');
     const rootPath = join(configuration, 'root.json');
-    await writeFile(rootPath, JSON.stringify({ $path: '/', $type: 'root',
-      '#mount': { $type: 't.mount.overlay', layers: ['base', 'work'] },
-      '#base': { $type: 't.mount.fs', root: relative(process.cwd(), base) },
-      '#work': { $type: 't.mount.fs', root: relative(process.cwd(), join(directory, 'work')) },
-    }));
-    await writeFile(configPath, JSON.stringify({ id: 'cli-base',
-      credentialTtlMs: 60_000, allowedOrigins: [], modules: [], port: 0 }));
-    const first = await start(rootPath, configPath), connection = await openTwpHttp({ url: first.address, credential: await login(first.address) });
-    const errors: unknown[] = [], client = createTwpClient(connection, { close: connection.close, onError: error => errors.push(error) });
+    await writeFile(
+      rootPath,
+      JSON.stringify({
+        $path: '/',
+        $type: 'root',
+        '#mount': { $type: 't.mount.overlay', layers: ['base', 'work'] },
+        '#base': { $type: 't.mount.fs', root: relative(process.cwd(), base) },
+        '#work': { $type: 't.mount.fs', root: relative(process.cwd(), join(directory, 'work')) },
+      }),
+    );
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        id: 'cli-base',
+        credentialTtlMs: 60_000,
+        allowedOrigins: [],
+        modules: [],
+        port: 0,
+      }),
+    );
+    const first = await start(rootPath, configPath),
+      connection = await openTwpHttp({
+        url: first.address,
+        credential: await login(first.address),
+      });
+    const errors: unknown[] = [],
+      client = createTwpClient(connection, {
+        close: connection.close,
+        onError: (error) => errors.push(error),
+      });
     await client.ready;
     try {
       const copy = (await client.read({ node: '/doc' })).copies[0];
       if ('error' in copy) throw copy.error;
       assert.equal(copy.node.$id, identity);
       assert.equal(copy.node.count, 1);
-      assert.ok((await client.commit({ changes: [{ op: 'patch', path: '/doc', ops: { $inc: { count: 1 } } }] }).outcome).pos);
+      assert.ok(
+        (
+          await client.commit({
+            changes: [{ op: 'patch', path: '/doc', ops: { $inc: { count: 1 } } }],
+          }).outcome
+        ).pos,
+      );
       assert.equal(errors.length, 0);
-    } finally { client.close(); await first.close(); }
-    const second = await start(rootPath, configPath), reopenedConnection = await openTwpHttp({ url: second.address, credential: await login(second.address) });
-    const reopened = createTwpClient(reopenedConnection, { close: reopenedConnection.close, onError: error => errors.push(error) });
+    } finally {
+      client.close();
+      await first.close();
+    }
+    const second = await start(rootPath, configPath),
+      reopenedConnection = await openTwpHttp({
+        url: second.address,
+        credential: await login(second.address),
+      });
+    const reopened = createTwpClient(reopenedConnection, {
+      close: reopenedConnection.close,
+      onError: (error) => errors.push(error),
+    });
     await reopened.ready;
     try {
       const copy = (await reopened.read({ node: '/doc' })).copies[0];
@@ -351,7 +474,10 @@ describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
       assert.equal(copy.node.count, 2);
       assert.equal(errors.length, 0);
       assert.equal(await readFile(join(base, 'doc', '$'), 'utf8'), before);
-      assert.equal(typeof await readFile(join(directory, 'work', 'doc', '$'), 'utf8'), 'string');
-    } finally { reopened.close(); await second.close(); }
+      assert.equal(typeof (await readFile(join(directory, 'work', 'doc', '$'), 'utf8')), 'string');
+    } finally {
+      reopened.close();
+      await second.close();
+    }
   });
 });
