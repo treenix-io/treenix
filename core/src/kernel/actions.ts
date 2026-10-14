@@ -152,15 +152,15 @@ export function createActionRuntime(options: CommandOptions) {
       });
 
       /** Bind a supplied description to the actual admitted definition and target image. */
-      function assertDescriptor(node: Node, type: string, kind: ActionDef['kind']): void {
+      function assertDescriptor(node: Node, type: string, kind: ActionDef['kind'], expectedRevision = request.pre?.rev): void {
         const pre = request.pre;
         if (pre !== undefined && (pre.modules !== registry.digest || pre.type !== type || pre.kind !== kind
-          || pre.id !== node.$id || pre.rev !== node.$rev))
+          || pre.id !== node.$id || expectedRevision !== node.$rev))
           throw new KernelError('CONFLICT', 'Action differs from its supplied description');
       }
 
       /** Resolve the addressed component and exact action through the caller's Reader. */
-      async function classifyAction() {
+      async function classifyAction(expectedRevision = request.pre?.rev) {
         const result = await callerReads.read({ node: request.path });
         const copy = result.copies[0]!;
         assertActionCurrent();
@@ -180,7 +180,7 @@ export function createActionRuntime(options: CommandOptions) {
         if (!Object.hasOwn(definition.actions, request.action))
           throw new KernelError('NOT_FOUND', 'Action is absent');
         const action = definition.actions[request.action];
-        assertDescriptor(node, definition.name, action.kind);
+        assertDescriptor(node, definition.name, action.kind, expectedRevision);
         return { node, bits, ownComponent, definition, action };
       }
 
@@ -618,7 +618,7 @@ export function createActionRuntime(options: CommandOptions) {
             });
             let current: Awaited<ReturnType<typeof classifyAction>>;
             try {
-              current = await classifyAction();
+              current = await classifyAction(expectedRev);
             } catch (error) {
               if (error instanceof KernelError && error.code === 'NOT_FOUND')
                 throw new KernelError('CONFLICT', 'Action call projection changed between steps');
