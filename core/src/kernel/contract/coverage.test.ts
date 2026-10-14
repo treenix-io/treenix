@@ -1,17 +1,17 @@
-import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import ts from 'typescript'
-import { describe, it } from 'node:test'
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import { describe, it } from 'node:test';
 
-import { coverage, unresolvedCoverage } from './coverage'
+import { coverage, unresolvedCoverage } from './coverage';
 
 const numbered = (prefix: string, from: number, to: number) =>
-  Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${from + i}`)
+  Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${from + i}`);
 
 // Pinned against axioms.md: a dropped or renamed row fails here instead of leaving the gate unnoticed.
-const DEFINITIONS = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13']
-const AXIOMS = numbered('A', 0, 10)
-const THEOREMS = numbered('T', 1, 14)
+const DEFINITIONS = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13'];
+const AXIOMS = numbered('A', 0, 10);
+const THEOREMS = numbered('T', 1, 14);
 
 const INCIDENTS = [
   'incident: a user mount of fs, mongo or trpc read the server disk and opened SSRF',
@@ -28,12 +28,15 @@ const INCIDENTS = [
   "incident: a public form's anonymous W on the subscriber folder deleted others' entries",
   'incident: a client chose the $id of a new node',
   "incident: the type ACL skipped the node's main type",
-]
+];
 
 describe('kernel contract coverage', () => {
   it('has one row per normative item and Appendix A incident, and no other', () => {
-    assert.deepEqual(Object.keys(coverage).sort(), [...DEFINITIONS, ...AXIOMS, ...THEOREMS, ...INCIDENTS].sort())
-  })
+    assert.deepEqual(
+      Object.keys(coverage).sort(),
+      [...DEFINITIONS, ...AXIOMS, ...THEOREMS, ...INCIDENTS].sort(),
+    );
+  });
 
   it('every obligation names existing authored contract cases', () => {
     const parsed = new Map<string, ReadonlySet<string>>();
@@ -44,15 +47,22 @@ describe('kernel contract coverage', () => {
         const file = new URL(reference.file, import.meta.url);
         let names = parsed.get(file.href);
         if (names === undefined) {
-          const source = ts.createSourceFile(file.pathname, readFileSync(file, 'utf8'),
-            ts.ScriptTarget.Latest, true);
+          const source = ts.createSourceFile(
+            file.pathname,
+            readFileSync(file, 'utf8'),
+            ts.ScriptTarget.Latest,
+            true,
+          );
           const declared = new Set<string>();
           /** Read literal test declarations without counting similarly named strings or comments. */
           function visit(node: ts.Node): void {
             if (ts.isCallExpression(node) && node.arguments.length > 0) {
               const call = node.expression;
-              const name = ts.isIdentifier(call) ? call.text
-                : ts.isPropertyAccessExpression(call) ? call.name.text : undefined;
+              const name = ts.isIdentifier(call)
+                ? call.text
+                : ts.isPropertyAccessExpression(call)
+                  ? call.name.text
+                  : undefined;
               const title = node.arguments[0];
               if ((name === 'it' || name === 'test') && ts.isStringLiteral(title))
                 declared.add(title.text);

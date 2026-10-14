@@ -1281,7 +1281,6 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
   });
 });
 
-
 describe('continuation prelude identity', { timeout: 10_000 }, () => {
   it('deduplicates a keyed child started while constructing the next stream before its first yield', async (t) => {
     let charged = 0;

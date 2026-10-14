@@ -1,14 +1,14 @@
 import { instantiateModule } from '@treenx/core/kernel/manifest';
-import { nativeDeclaredModule,type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
 import { normalizeType } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
-import type { ActionDef,SecurityRegistration } from '@treenx/core/kernel/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir,mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
-import { describe,it,type TestContext } from 'node:test';
+import { describe, it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
@@ -19,19 +19,19 @@ import { drainSession } from '#kernel/session-delivery';
 import { scanBudget } from '#kernel/store/contract';
 import { createMemoryStore } from '#kernel/store/memory';
 import {
-R,
-W,
-type ActionIoScope,
-type Credential,
-type Gate,
-type Io,
-type Node,
-type OpId,
-type Pending,
-type Position,
-type PositionCounter,
-type TypeDef,
-type WriteActionContext,
+  R,
+  W,
+  type ActionIoScope,
+  type Credential,
+  type Gate,
+  type Io,
+  type Node,
+  type OpId,
+  type Pending,
+  type Position,
+  type PositionCounter,
+  type TypeDef,
+  type WriteActionContext,
 } from '#kernel/types';
 
 interface ExternalCapability {
@@ -126,24 +126,44 @@ async function moduleFor(
 ) {
   const module = await (() => {
     const owner = `io-contract:${randomUUID()}`;
-    return instantiateModule({ collectionId: owner, factory: () => {
-      const schemas: Record<string, TypeSchema> = {};
-      const declaredActions: Record<string, Record<string, ActionDef>> = {};
-      const classes: Record<string, NativeClassDeclaration> = {};
-      const security: SecurityRegistration[] = [];
-    schemas[normalizeType(workerType)] = (() => ({ $id: workerType, type: 'object', properties: {} }))();
-    for (const [name, action] of Object.entries(actions))
-      (declaredActions[normalizeType(workerType)] ??= {})[name] = action;
-    class IoForm {
-      count = 0;
-    }
-    classes[normalizeType(formType)] = { cls: Object.assign(IoForm, { $type: normalizeType(formType) }), security: 'user-capability', meta: { security: 'user-capability' } };
-    schemas[normalizeType(formType)] = (() => ({ $id: formType, type: 'object', properties: {} }))();
-    for (const [name, action] of Object.entries(forms))
-      (declaredActions[normalizeType(formType)] ??= {})[name] = action;
+    return instantiateModule(
+      {
+        collectionId: owner,
+        factory: () => {
+          const schemas: Record<string, TypeSchema> = {};
+          const declaredActions: Record<string, Record<string, ActionDef>> = {};
+          const classes: Record<string, NativeClassDeclaration> = {};
+          const security: SecurityRegistration[] = [];
+          schemas[normalizeType(workerType)] = (() => ({
+            $id: workerType,
+            type: 'object',
+            properties: {},
+          }))();
+          for (const [name, action] of Object.entries(actions))
+            (declaredActions[normalizeType(workerType)] ??= {})[name] = action;
+          class IoForm {
+            count = 0;
+          }
+          classes[normalizeType(formType)] = {
+            cls: Object.assign(IoForm, { $type: normalizeType(formType) }),
+            security: 'user-capability',
+            meta: { security: 'user-capability' },
+          };
+          schemas[normalizeType(formType)] = (() => ({
+            $id: formType,
+            type: 'object',
+            properties: {},
+          }))();
+          for (const [name, action] of Object.entries(forms))
+            (declaredActions[normalizeType(formType)] ??= {})[name] = action;
 
-      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
-    } }, {});
+          return {
+            manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security),
+          };
+        },
+      },
+      {},
+    );
   })();
   return module;
 }
@@ -909,10 +929,7 @@ describe('native action I/O', { timeout: 10_000 }, () => {
         args: {},
         handler: async (ctx) => {
           await external(ctx).exchange('uncertain');
-          throw new KernelError(
-            'UNAVAILABLE',
-            'External result was not accepted',
-          );
+          throw new KernelError('UNAVAILABLE', 'External result was not accepted');
         },
       },
       run: {
@@ -1012,7 +1029,6 @@ describe('native action I/O', { timeout: 10_000 }, () => {
   });
 });
 
-
 describe('ordinary I/O Store ownership', { timeout: 10_000 }, () => {
   it('publishes an ordinary bound-I/O action effect wholly in another native Store without becoming a stream', async (t) => {
     const f = await fixture(t, {
@@ -1047,9 +1063,7 @@ describe('ordinary I/O Store ownership', { timeout: 10_000 }, () => {
     }).outcome;
     await f.admin.commit({
       opId: f.key(),
-      changes: [
-        { op: 'put', node: { $path: '/work/alternate', $type: 't.dir' } },
-      ],
+      changes: [{ op: 'put', node: { $path: '/work/alternate', $type: 't.dir' } }],
     }).outcome;
     const caller = await f.open();
     const request = {
