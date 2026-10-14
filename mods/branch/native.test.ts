@@ -1,7 +1,6 @@
+import { createTestDirectory } from './test-directory';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
@@ -27,7 +26,7 @@ const fixture: ModuleManifest = { id: 'branch-fixture', security: [], open: [], 
 ] };
 
 test('native branch reads its authorized lower and commits future changes only to upper', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-normal-'));
+  const directory = await createTestDirectory('native-branch-normal-');
   const runtime = await openNativeRuntime({ id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-test-password' }, modules: [fixture, nativeBranchManifest()] });
   assert.ok(runtime.instance.setupCredential);
@@ -111,7 +110,7 @@ test('native branch reads its authorized lower and commits future changes only t
 
 
 test('native branch lifecycle creates, reviews and merges one bounded atomic future', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-lifecycle-'));
+  const directory = await createTestDirectory('native-branch-lifecycle-');
   const runtime = await openNativeRuntime({ id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-test-password' }, modules: [fixture, nativeBranchManifest()] });
   assert.ok(runtime.instance.setupCredential);
@@ -166,7 +165,7 @@ test('native branch lifecycle creates, reviews and merges one bounded atomic fut
 
 
 test('native branch restores node executor identity before the first projected read', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-reopen-'));
+  const directory = await createTestDirectory('native-branch-reopen-');
   const config = { id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-test-password' }, modules: [fixture, nativeBranchManifest()] };
   const runtime = await openNativeRuntime(config);
@@ -211,7 +210,7 @@ test('native branch restores node executor identity before the first projected r
 
 
 test('native branch adopts root and new cross-referenced futures in one decision', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-adopt-'));
+  const directory = await createTestDirectory('native-branch-adopt-');
   const runtime = await openNativeRuntime({ id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-test-password' }, modules: [fixture, nativeBranchManifest()] });
   assert.ok(runtime.instance.setupCredential);

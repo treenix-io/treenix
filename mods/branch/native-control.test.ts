@@ -1,6 +1,7 @@
+import { createTestDirectory } from './test-directory';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { KernelError } from '@treenx/core/errors';
@@ -12,7 +13,7 @@ import { nativeBranchManifest } from './native';
 
 /** Rooted tool coordinates retain actual Session scope for both control and live publication. */
 test('native rooted MCP reads its branch control and refuses live merge outside its credential scope', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-control-'));
+  const directory = await createTestDirectory('native-branch-control-');
   const runtime = await openNativeRuntime({ id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-control-password' }, modules: [nativeBranchManifest()] });
   assert.ok(runtime.instance.setupCredential);
@@ -71,15 +72,18 @@ test('native rooted MCP reads its branch control and refuses live merge outside 
 
 /** Discovery imports the owning native factory without loading legacy branch registrations. */
 test('native Branch is collected by the actual kernel module loader', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-branch-discovery-'));
+  const directory = await createTestDirectory('native-branch-discovery-');
+  await writeFile(resolve(directory, 'package.json'), JSON.stringify({
+    name: '@treenx/mods', type: 'module', imports: { '#*': './*.ts' },
+  }));
   await mkdir(resolve(directory, 'branch'));
-  for (const file of ['kernel.ts', 'native.ts', 'native-actions.ts', 'native-types.ts'])
+  for (const file of ['kernel.ts', 'native.ts', 'native-actions.ts', 'native-types.ts', 'native-index.ts'])
     await copyFile(resolve('branch', file), resolve(directory, 'branch', file));
   await mkdir(resolve(directory, 'branch/schemas'));
   for (const file of ['t.branch.json', 't.branches.json'])
     await copyFile(resolve('branch/schemas', file), resolve(directory, 'branch/schemas', file));
   const collected = await loadLocalMods(directory, 'kernel');
-  assert.equal(collected.failed.length, 0);
+  assert.deepEqual(collected.failed, []);
   assert.equal(collected.manifests.length, 1);
   assert.equal(collected.manifests[0].id, '@treenx/mods/branch');
   assert.ok(collected.manifests[0].types.some(type => type.name === 't.branch'));

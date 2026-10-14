@@ -1,7 +1,6 @@
+import { createTestDirectory } from './test-directory';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { KernelError } from '@treenx/core/errors';
 import { openNativeRuntime } from '@treenx/core/kernel/runtime';
@@ -22,7 +21,7 @@ const fixture: ModuleManifest = { id: 'branch-generation', security: [], open: [
 ] };
 
 test('future root recreation retires its issued identity and persists a fresh generation', { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(resolve('temp/native-root-generation-'));
+  const directory = await createTestDirectory('native-root-generation-');
   const config = { id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'generation-test-password' }, modules: [fixture, nativeBranchManifest()] };
   const runtime = await openNativeRuntime(config);
