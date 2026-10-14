@@ -2,7 +2,12 @@ import { KernelError } from '@treenx/core/errors';
 import type { JsonSchema, ModuleManifest } from '@treenx/core/kernel/types';
 import { addTypeValidator } from '@treenx/core/comp/validate';
 import schemaOrgV29 from './packs/schemaorg-v29.json';
-import { type ClassOverride, type JsonLdSnapshot, type SlottedPropertySchema, translateClass } from './translate';
+import {
+  type ClassOverride,
+  type JsonLdSnapshot,
+  type SlottedPropertySchema,
+  translateClass,
+} from './translate';
 import { refOrComponentValidator } from './validator';
 import { declareClientSchema } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
@@ -56,9 +61,15 @@ const OVERRIDES: Record<string, ClassOverride> = {
 
 const PREFIX = 'jsonld.schema-org.';
 
-export const clientModules = [declareOpenModule('@treenx/jsonld-types/schema-org-v29/defaults', [],
-  Object.entries(OVERRIDES).map(([name, override]) =>
-    declareClientSchema(`${PREFIX}${name}`, () => translateClass(SNAPSHOT, name, override))))];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/jsonld-types/schema-org-v29/defaults',
+    [],
+    Object.entries(OVERRIDES).map(([name, override]) =>
+      declareClientSchema(`${PREFIX}${name}`, () => translateClass(SNAPSHOT, name, override)),
+    ),
+  ),
+];
 
 /** Initialize the slot validator. Schemas are published by each owning client module or native manifest. */
 export function loadSchemaOrgV29Pack(): void {
@@ -69,11 +80,18 @@ export function loadSchemaOrgV29Pack(): void {
 function nativeProperty(property: SlottedPropertySchema): JsonSchema {
   const { items, slotType, ...shape } = property;
   if (property.type === 'jsonld.refOrComponent') {
-    if (slotType === undefined) throw new KernelError('INVALID', 'JSON-LD slot has no declared component type');
-    return { anyOf: [
-      { type: 'object', required: ['$ref'], properties: { $ref: { type: 'string' } } },
-      { type: 'object', required: ['$type'], properties: { $type: { type: 'string', enum: [slotType] } } },
-    ] };
+    if (slotType === undefined)
+      throw new KernelError('INVALID', 'JSON-LD slot has no declared component type');
+    return {
+      anyOf: [
+        { type: 'object', required: ['$ref'], properties: { $ref: { type: 'string' } } },
+        {
+          type: 'object',
+          required: ['$type'],
+          properties: { $type: { type: 'string', enum: [slotType] } },
+        },
+      ],
+    };
   }
   return { ...shape, ...(items === undefined ? {} : { items: nativeProperty(items) }) };
 }
@@ -81,10 +99,28 @@ function nativeProperty(property: SlottedPropertySchema): JsonSchema {
 /** Install the complete curated pack before writes; native lookup never lazily publishes mid-operation. */
 export function schemaOrgV29NativeManifest(): ModuleManifest {
   const module = '@treenx/jsonld-types/schema-org-v29';
-  return { id: module, security: [], open: [], types: Object.entries(OVERRIDES).map(([name, override]) => {
-    const translated = translateClass(SNAPSHOT, name, override);
-    return { name: `${PREFIX}${name}`, module, security: 'ordinary' as const, version: 0, actions: {},
-      schema: { ...translated, properties: Object.fromEntries(Object.entries(translated.properties).map(([key, property]) => [key, nativeProperty(property)])) },
-    };
-  }) };
+  return {
+    id: module,
+    security: [],
+    open: [],
+    types: Object.entries(OVERRIDES).map(([name, override]) => {
+      const translated = translateClass(SNAPSHOT, name, override);
+      return {
+        name: `${PREFIX}${name}`,
+        module,
+        security: 'ordinary' as const,
+        version: 0,
+        actions: {},
+        schema: {
+          ...translated,
+          properties: Object.fromEntries(
+            Object.entries(translated.properties).map(([key, property]) => [
+              key,
+              nativeProperty(property),
+            ]),
+          ),
+        },
+      };
+    }),
+  };
 }

@@ -4,10 +4,16 @@ import { openTwpHttp } from '@treenx/core/client/http-twp';
 import { createTwpClient } from '@treenx/core/client/twp';
 
 /** Bind route discovery and rendering to this request's credential and cancellation. */
-export async function openSsrSession(url: string, request: IncomingMessage, response: ServerResponse) {
+export async function openSsrSession(
+  url: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
   const controller = new AbortController();
   const abort = () => controller.abort(new KernelError('CANCELLED', 'SSR request ended'));
-  const disconnect = () => { if (!response.writableEnded) abort(); };
+  const disconnect = () => {
+    if (!response.writableEnded) abort();
+  };
   request.once('aborted', abort);
   response.once('close', disconnect);
   const headers: Record<string, string> = {};
@@ -23,12 +29,20 @@ export async function openSsrSession(url: string, request: IncomingMessage, resp
     response.off('close', disconnect);
   }
   try {
-    const connection = await openTwpHttp({ url, headers, signal: controller.signal,
-      credentials: headers.cookie === undefined ? 'omit' : 'include' });
+    const connection = await openTwpHttp({
+      url,
+      headers,
+      signal: controller.signal,
+      credentials: headers.cookie === undefined ? 'omit' : 'include',
+    });
     const client = createTwpClient(connection, { close: connection.close });
     closeTransport = () => client.close();
     await client.ready;
-    return { reader: client, private: headers.cookie !== undefined || headers.authorization !== undefined, close };
+    return {
+      reader: client,
+      private: headers.cookie !== undefined || headers.authorization !== undefined,
+      close,
+    };
   } catch (error) {
     close();
     throw error;

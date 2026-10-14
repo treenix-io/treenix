@@ -16,17 +16,24 @@ import { resolveRoute, type ResolveResult } from '@treenx/react/router/route-res
 
 /** Traverse native immediate-child pages under a bounded route inventory. */
 export async function fetchRouteNodes(reader: Reader): Promise<PresentationNode[]> {
-  const nodes: PresentationNode[] = [], pending = ['/sys/routes'];
+  const nodes: PresentationNode[] = [],
+    pending = ['/sys/routes'];
   for (let index = 0; index < pending.length; index++) {
     let after: string | undefined;
     do {
-      const result = await reader.read({ children: pending[index], window: { limit: 100, ...(after === undefined ? {} : { after }) } });
-      const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]));
+      const result = await reader.read({
+        children: pending[index],
+        window: { limit: 100, ...(after === undefined ? {} : { after }) },
+      });
+      const copies = new Map(
+        result.copies.map((copy) => ['node' in copy ? copy.node.$id : copy.id, copy]),
+      );
       for (const id of result.list) {
         const copy = copies.get(id);
         if (copy === undefined) throw new KernelError('INVALID', 'Route member has no native copy');
         if ('error' in copy) throw copy.error;
-        if (nodes.length >= 1000) throw new KernelError('BUDGET', 'Route inventory exceeds its bound');
+        if (nodes.length >= 1000)
+          throw new KernelError('BUDGET', 'Route inventory exceeds its bound');
         nodes.push(copy.node);
         pending.push(copy.node.$path);
       }

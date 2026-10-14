@@ -22,4 +22,6 @@ export class Site {
   };
 }
 
-export const clientModules = [declareOpenModule('@treenx/ssr/site', [], [declareClientType('t.site', Site)])];
+export const clientModules = [
+  declareOpenModule('@treenx/ssr/site', [], [declareClientType('t.site', Site)]),
+];

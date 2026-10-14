@@ -1,13 +1,21 @@
 import { MongoClient } from 'mongodb';
 
 // Shared MongoClient pool — one client per URI, reused across mounts
-const clientPool = new Map<string, { client: MongoClient; refCount: number; ready: Promise<MongoClient> }>();
+const clientPool = new Map<
+  string,
+  { client: MongoClient; refCount: number; ready: Promise<MongoClient> }
+>();
 
-export function getSharedClient(uri: string, monitorCommands = false): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
+export function getSharedClient(
+  uri: string,
+  monitorCommands = false,
+): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
   const key = monitorCommands ? JSON.stringify([uri, 'monitorCommands']) : uri;
   let entry = clientPool.get(key);
   if (!entry) {
-    const client = monitorCommands ? new MongoClient(uri, { monitorCommands: true }) : new MongoClient(uri);
+    const client = monitorCommands
+      ? new MongoClient(uri, { monitorCommands: true })
+      : new MongoClient(uri);
     const ready = client.connect();
     entry = { client, refCount: 0, ready };
     clientPool.set(key, entry);

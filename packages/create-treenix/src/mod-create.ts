@@ -6,7 +6,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 function toClassName(name: string): string {
-  return name.split('-').map(s => s[0].toUpperCase() + s.slice(1)).join('');
+  return name
+    .split('-')
+    .map((s) => s[0].toUpperCase() + s.slice(1))
+    .join('');
 }
 
 function findModsDir(): string {
@@ -76,12 +79,15 @@ export async function modCreate(args: string[], yes: boolean) {
     const result = await text({
       message: 'Mod name',
       placeholder: 'my-mod',
-      validate: v => {
+      validate: (v) => {
         if (!v.length) return 'Required';
         if (!/^[a-z][a-z0-9-]*$/.test(v)) return 'Lowercase letters, numbers, hyphens only';
       },
     });
-    if (isCancel(result)) { cancel(); process.exit(0); }
+    if (isCancel(result)) {
+      cancel();
+      process.exit(0);
+    }
     name = String(result);
   }
 
@@ -103,8 +109,9 @@ export async function modCreate(args: string[], yes: boolean) {
 
   mkdirSync(modDir, { recursive: true });
 
-  writeFileSync(join(modDir, 'types.ts'),
-`import { declareClientType } from '@treenx/core/comp/client-declaration';
+  writeFileSync(
+    join(modDir, 'types.ts'),
+    `import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 export class ${cls} {
@@ -112,19 +119,23 @@ export class ${cls} {
 }
 
 export const clientModules = [declareOpenModule(${JSON.stringify(owner + '/types')}, [], [declareClientType('${name}', ${cls})])];
-`);
+`,
+  );
 
-  writeFileSync(join(modDir, 'seed.ts'),
-`import { nativeSeed } from '@treenx/mods/prefab/seed';
+  writeFileSync(
+    join(modDir, 'seed.ts'),
+    `import { nativeSeed } from '@treenx/mods/prefab/seed';
 
 export const seeds = nativeSeed('${name}', [
   { $path: '${name}', $type: 'dir' },
   { $path: '${name}/example', $type: '${name}', title: 'Example' },
 ]);
-`);
+`,
+  );
 
-  writeFileSync(join(modDir, 'view.tsx'),
-`import React from 'react';
+  writeFileSync(
+    join(modDir, 'view.tsx'),
+    `import React from 'react';
 import { view } from '@treenx/react';
 import { declareClientModule } from '@treenx/react/context/client-registry';
 import { ${cls} } from './types';
@@ -134,10 +145,12 @@ export const clientModules = [declareClientModule(${JSON.stringify(owner + '/vie
     <h2 className="text-lg font-bold">{value.title}</h2>
   </div>
 ))])];
-`);
+`,
+  );
 
-  writeFileSync(join(modDir, 'kernel.ts'),
-`import { normalizeType } from '@treenx/core';
+  writeFileSync(
+    join(modDir, 'kernel.ts'),
+    `import { normalizeType } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
@@ -158,7 +171,8 @@ export default function createNativeModule(): NativeModuleDeployment {
     ...Object.entries(type.actions).map(([action, handler]) => ({ type: name, context: 'action:' + action, handler })),
   ]), types: [type], security: [] }, seeds };
 }
-`);
+`,
+  );
 
   addToRootSeeds(name);
 

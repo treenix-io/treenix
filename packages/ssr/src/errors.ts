@@ -22,7 +22,9 @@ export class MissingSiteViewError extends Error {
 export class SsrDataUnresolved extends Error {
   readonly code = 'SSR_DATA_UNRESOLVED' as const;
   constructor(public readonly pendingPaths: string[]) {
-    super(`SSR render did not stabilise after max passes; still pending: ${pendingPaths.slice(0, 10).join(', ')}`);
+    super(
+      `SSR render did not stabilise after max passes; still pending: ${pendingPaths.slice(0, 10).join(', ')}`,
+    );
     this.name = 'SsrDataUnresolved';
   }
 }

@@ -13,19 +13,29 @@ it('loads closed Mongo deployment mappings through the real offline CLI and pres
   await writeFile(join(root, '.treenix-version'), '1\n');
   await writeFile(join(root, '$.json'), JSON.stringify({ $type: 'dir', $id: 'root-id' }));
   const uri = 'mongodb://127.0.0.1:27017/?replicaSet=upgrade';
-  const legacy = JSON.stringify({ $type: 't.mount.mongo', $id: 'mount-id', uri, db: 'data', collection: 'nodes' });
+  const legacy = JSON.stringify({
+    $type: 't.mount.mongo',
+    $id: 'mount-id',
+    uri,
+    db: 'data',
+    collection: 'nodes',
+  });
   await writeFile(join(root, 'mount', '$.json'), legacy);
   const deployment = join(area, 'deployment.mjs');
-  await writeFile(deployment, `import { createRegistry } from ${JSON.stringify(new URL('../../../core/src/kernel/registry.ts', import.meta.url).href)};
+  await writeFile(
+    deployment,
+    `import { createRegistry } from ${JSON.stringify(new URL('../../../core/src/kernel/registry.ts', import.meta.url).href)};
 import { kernelManifest } from ${JSON.stringify(new URL('../../../core/src/kernel/builtins.ts', import.meta.url).href)};
 import { createMongoManifest } from ${JSON.stringify(new URL('./native-mount.ts', import.meta.url).href)};
 const registry = createRegistry();
 registry.publish(kernelManifest);
 registry.publish(createMongoManifest({ cluster: { connection: '/connection', domain: 'upgrade', instance: 'upgrade', journalDb: 'journal', journalCollection: 'records' } }));
 export const upgradeDeployment = { registry, mongoConnections: { ${JSON.stringify(uri)}: { cluster: 'cluster', path: '/connection' } } };
-`);
-  assert.deepEqual((await loadUpgradeDeployment(deployment)).mongoConnections,
-    { [uri]: { cluster: 'cluster', path: '/connection' } });
+`,
+  );
+  assert.deepEqual((await loadUpgradeDeployment(deployment)).mongoConnections, {
+    [uri]: { cluster: 'cluster', path: '/connection' },
+  });
   const plan = join(area, 'plan.json');
   const args = ['--root', root, '--deployment', deployment, '--plan', plan];
   await upgradeKernelCli([...args, '--dry-run']);
@@ -42,7 +52,10 @@ export const upgradeDeployment = { registry, mongoConnections: { ${JSON.stringif
   assert.equal(closed.$type, 't.mongo.connection');
   assert.equal(closed.uri, uri);
   assert.ok(typeof closed.$id === 'string' && closed.$id.length !== 0);
-  assert.deepEqual(closed.$acl, [{ subject: { group: 'admins' }, grant: 7 }, { subject: { group: 'n:mount-id' }, grant: 1 }]);
+  assert.deepEqual(closed.$acl, [
+    { subject: { group: 'admins' }, grant: 7 },
+    { subject: { group: 'n:mount-id' }, grant: 1 },
+  ]);
   await upgradeKernelCli([...args, '--apply', '--backup', backup]);
   assert.equal(await readFile(join(root, 'connection', '$.json'), 'utf8'), connection);
 });

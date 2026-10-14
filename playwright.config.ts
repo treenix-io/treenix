@@ -8,7 +8,5 @@ export default defineConfig({
     baseURL: 'http://localhost:3210',
     browserName: 'firefox',
   },
-  projects: [
-    { name: 'firefox', use: { browserName: 'firefox' } },
-  ],
+  projects: [{ name: 'firefox', use: { browserName: 'firefox' } }],
 });

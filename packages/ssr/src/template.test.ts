@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHtmlShell, escape, escapeAttr, escapeJson, escapeUrl, extractBodyHeadHints } from './template';
+import {
+  buildHtmlShell,
+  escape,
+  escapeAttr,
+  escapeJson,
+  escapeUrl,
+  extractBodyHeadHints,
+} from './template';
 
 describe('escape', () => {
   it('blocks script-injection in element text', () => {
@@ -86,7 +93,9 @@ describe('buildHtmlShell', () => {
       hydrateScriptUrl: '/assets/entry-hydrate.js',
     });
     assert.ok(html.includes('data-treenix-mode="hydrate"'));
-    assert.ok(html.includes('<script type="application/json" id="treenix-initial">{"foo":1}</script>'));
+    assert.ok(
+      html.includes('<script type="application/json" id="treenix-initial">{"foo":1}</script>'),
+    );
     assert.ok(html.includes('<script type="module" src="/assets/entry-hydrate.js"></script>'));
   });
 
@@ -142,7 +151,9 @@ describe('buildHtmlShell', () => {
 
     assert.ok(html.includes('<head>'));
     assert.ok(html.includes('<link rel="preload" as="image" href="/hero.png"/>'));
-    assert.ok(html.includes('<div id="root" data-treenix-mode="hydrate"><div class="page">Hi</div></div>'));
+    assert.ok(
+      html.includes('<div id="root" data-treenix-mode="hydrate"><div class="page">Hi</div></div>'),
+    );
   });
 });
 

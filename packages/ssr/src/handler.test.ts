@@ -17,7 +17,11 @@ const testRender: RenderFn = ({ node }) => {
 
 const deps = (routes: RouteIndex, reader: Reader) => ({ routes, reader, render: testRender });
 
-const emptyTree: Reader = { async read() { return { list: [], copies: [], at: [] }; } };
+const emptyTree: Reader = {
+  async read() {
+    return { list: [], copies: [], at: [] };
+  },
+};
 
 function req(pathname: string, opts: { preview?: boolean; admin?: boolean } = {}): SsrRequest {
   const q = new URLSearchParams();
@@ -45,7 +49,8 @@ describe('ssrHandler', () => {
 
   it('returns null when t.site.mode = spa', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'page',
+      $path: '/sys/routes/about',
+      $type: 'page',
       '#site': { $type: 't.site', state: 'published', mode: 'spa' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
@@ -54,7 +59,8 @@ describe('ssrHandler', () => {
 
   it('404s draft pages for the public', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'page',
+      $path: '/sys/routes/about',
+      $type: 'page',
       '#site': { $type: 't.site', state: 'draft', mode: 'static' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
@@ -63,7 +69,8 @@ describe('ssrHandler', () => {
 
   it('serves draft pages with no-store when admin + preview=1', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'test.handler.page',
+      $path: '/sys/routes/about',
+      $type: 'test.handler.page',
       heading: 'About',
       '#site': { $type: 't.site', state: 'draft', mode: 'static' },
       '#seo': { $type: 't.seo', title: 'About — Draft' },
@@ -80,7 +87,8 @@ describe('ssrHandler', () => {
 
   it('serves a published static page with title + body', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'test.handler.page',
+      $path: '/sys/routes/about',
+      $type: 'test.handler.page',
       heading: 'About',
       '#site': { $type: 't.site', state: 'published', mode: 'static' },
       '#seo': { $type: 't.seo', title: 'About Us' },
@@ -96,7 +104,8 @@ describe('ssrHandler', () => {
 
   it('hydrate mode embeds initial state JSON + uses hydrate marker', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'test.handler.page',
+      $path: '/sys/routes/about',
+      $type: 'test.handler.page',
       heading: 'Hi',
       '#site': { $type: 't.site', state: 'published', mode: 'hydrate' },
       '#seo': { $type: 't.seo', title: 'X' },
@@ -109,10 +118,13 @@ describe('ssrHandler', () => {
 
   it('respects t.site.cache for non-preview requests', async () => {
     const node = {
-      $path: '/sys/routes/about', $type: 'test.handler.page',
+      $path: '/sys/routes/about',
+      $type: 'test.handler.page',
       heading: 'C',
       '#site': {
-        $type: 't.site', state: 'published', mode: 'static',
+        $type: 't.site',
+        state: 'published',
+        mode: 'static',
         cache: { maxAge: 60, staleWhileRevalidate: 600 },
       },
       '#seo': { $type: 't.seo', title: 'C' },

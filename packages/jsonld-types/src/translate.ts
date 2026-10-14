@@ -29,8 +29,14 @@ export type ClassOverride = {
 };
 
 // PropertySchema extended with slotType for component slot fields
-export type SlottedPropertySchema = Omit<PropertySchema, 'items'> & { slotType?: string; items?: SlottedPropertySchema };
-export type TranslatedClassSchema = Omit<TypeSchema, 'properties'> & { $id: string; properties: Record<string, SlottedPropertySchema> };
+export type SlottedPropertySchema = Omit<PropertySchema, 'items'> & {
+  slotType?: string;
+  items?: SlottedPropertySchema;
+};
+export type TranslatedClassSchema = Omit<TypeSchema, 'properties'> & {
+  $id: string;
+  properties: Record<string, SlottedPropertySchema>;
+};
 
 const PREFIX = 'jsonld.schema-org.';
 
@@ -62,7 +68,7 @@ function findPropertiesForClass(snapshot: JsonLdSnapshot, classId: string): Json
     const types = arrayify(node['@type']);
     if (!types.includes('rdf:Property')) continue;
     const domains = arrayify(node['schema:domainIncludes']);
-    if (domains.some(d => d['@id'] === classId)) result.push(node);
+    if (domains.some((d) => d['@id'] === classId)) result.push(node);
   }
   return result;
 }
@@ -71,17 +77,20 @@ function buildScalar(field: FieldOverride, ranges: string[]): SlottedPropertySch
   if (field.slotType) {
     return { type: 'jsonld.refOrComponent', slotType: field.slotType };
   }
-  if (ranges.some(r => TEXT_RANGES.has(r))) return { type: 'string' };
-  if (ranges.some(r => r === 'schema:Number' || r === 'schema:Integer' || r === 'schema:Float')) {
+  if (ranges.some((r) => TEXT_RANGES.has(r))) return { type: 'string' };
+  if (ranges.some((r) => r === 'schema:Number' || r === 'schema:Integer' || r === 'schema:Float')) {
     return { type: 'number' };
   }
-  if (ranges.some(r => r === 'schema:Boolean')) return { type: 'boolean' };
+  if (ranges.some((r) => r === 'schema:Boolean')) return { type: 'boolean' };
   // unknown range — default to string (safe for curation-gated output)
   return { type: 'string' };
 }
 
-function buildFieldSchema(field: FieldOverride, propNode: JsonLdNode | undefined): SlottedPropertySchema {
-  const ranges = propNode ? arrayify(propNode['schema:rangeIncludes']).map(r => r['@id']) : [];
+function buildFieldSchema(
+  field: FieldOverride,
+  propNode: JsonLdNode | undefined,
+): SlottedPropertySchema {
+  const ranges = propNode ? arrayify(propNode['schema:rangeIncludes']).map((r) => r['@id']) : [];
   const scalar = buildScalar(field, ranges);
   if (field.cardinality === 'array') return { type: 'array', items: scalar };
   return scalar;
@@ -111,14 +120,17 @@ export function translateClass(
   const queue: JsonLdNode[] = [classNode];
   while (queue.length > 0) {
     const current = queue.shift()!;
-    const parents = arrayify(current['rdfs:subClassOf']).map(p => p['@id']);
+    const parents = arrayify(current['rdfs:subClassOf']).map((p) => p['@id']);
     for (const parentId of parents) {
       if (visited.has(parentId)) continue;
       visited.add(parentId);
       const shortParent = parentId.replace(/^schema:/, '');
       let parentNode: JsonLdNode | undefined;
-      try { parentNode = findClass(snapshot, shortParent); }
-      catch { continue; } // parent not in snapshot — skip
+      try {
+        parentNode = findClass(snapshot, shortParent);
+      } catch {
+        continue;
+      } // parent not in snapshot — skip
       for (const propNode of findPropertiesForClass(snapshot, parentId)) {
         const shortName = propNode['@id'].replace(/^schema:/, '');
         if (!propsByName.has(shortName)) propsByName.set(shortName, propNode);
@@ -137,8 +149,8 @@ export function translateClass(
       // Loud-fail catches typos (override.knosw vs schema:knows) and fixture drift.
       throw new Error(
         `translateClass(${className}): override field not found in snapshot — "${name}" ` +
-        `has no rdf:Property with schema:domainIncludes ${classId} or any ancestor. ` +
-        `Either fix the override field name or add slotType to declare it as a slot.`,
+          `has no rdf:Property with schema:domainIncludes ${classId} or any ancestor. ` +
+          `Either fix the override field name or add slotType to declare it as a slot.`,
       );
     }
     properties[name] = buildFieldSchema(fieldOverride, propNode);

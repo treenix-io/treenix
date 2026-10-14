@@ -1,4 +1,10 @@
-import { Binary, Long, type ClientSession, type CommandStartedEvent, type MongoClient } from 'mongodb';
+import {
+  Binary,
+  Long,
+  type ClientSession,
+  type CommandStartedEvent,
+  type MongoClient,
+} from 'mongodb';
 import { KernelError } from '@treenx/core/errors';
 
 export interface OwnedTransaction {
@@ -14,8 +20,13 @@ export function transactionKey(transaction: OwnedTransaction): string {
 
 /** Decode third-party wire metadata loudly before it becomes owner recognition data. */
 export function wireTransaction(session: unknown, number: unknown): OwnedTransaction {
-  if (session === null || typeof session !== 'object' || !('id' in session)
-    || !(session.id instanceof Binary) || !(number instanceof Long))
+  if (
+    session === null ||
+    typeof session !== 'object' ||
+    !('id' in session) ||
+    !(session.id instanceof Binary) ||
+    !(number instanceof Long)
+  )
     throw new KernelError('INVALID', 'Malformed Mongo transaction identity');
   return { session: session.id, number };
 }
@@ -40,16 +51,20 @@ export function createOwnedTransactions(client: MongoClient) {
       const identity = session.id;
       if (identity === undefined) throw new KernelError('INVALID', 'Mongo session has no identity');
       const key = transactionKey(wireTransaction(identity, Long.ZERO));
-      if (sessions.has(key)) throw new KernelError('INVALID', 'Mongo owner session is already registered');
+      if (sessions.has(key))
+        throw new KernelError('INVALID', 'Mongo owner session is already registered');
       const owned: { current?: OwnedTransaction } = {};
       sessions.set(key, owned);
       return {
         /** Return the observed attempt only after its first actual transactional command. */
         current(): OwnedTransaction {
-          if (owned.current === undefined) throw new KernelError('INVALID', 'Mongo transaction has no observed command');
+          if (owned.current === undefined)
+            throw new KernelError('INVALID', 'Mongo transaction has no observed command');
           return owned.current;
         },
-        close(): void { sessions.delete(key); },
+        close(): void {
+          sessions.delete(key);
+        },
       };
     },
     /** Pending recognition covers events delivered before the commit promise settles. */

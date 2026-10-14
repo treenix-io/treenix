@@ -26,4 +26,6 @@ export class Seo {
   jsonLd?: Record<string, unknown>;
 }
 
-export const clientModules = [declareOpenModule('@treenx/ssr/seo', [], [declareClientType('t.seo', Seo)])];
+export const clientModules = [
+  declareOpenModule('@treenx/ssr/seo', [], [declareClientType('t.seo', Seo)]),
+];

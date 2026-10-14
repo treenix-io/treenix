@@ -106,7 +106,7 @@ export async function ssrHandler(
   }
   if (source.pendingCount() > 0) {
     const { paths, children } = source.pending();
-    throw new SsrDataUnresolved([...paths, ...children.map(c => `children:${c}`)]);
+    throw new SsrDataUnresolved([...paths, ...children.map((c) => `children:${c}`)]);
   }
 
   const css = deps.tailwindJit ? await deps.tailwindJit(html) : '';
@@ -131,16 +131,19 @@ export async function ssrHandler(
     headers['Cache-Control'] = req.private ? 'private, no-store' : 'no-store';
   } else if (site.cache?.maxAge != null) {
     const swr = site.cache.staleWhileRevalidate;
-    headers['Cache-Control'] = `public, max-age=${site.cache.maxAge}` +
+    headers['Cache-Control'] =
+      `public, max-age=${site.cache.maxAge}` +
       (swr != null ? `, stale-while-revalidate=${swr}` : '');
   }
 
-  const seo = seoNode ? {
-    title: seoNode.title,
-    description: seoNode.description,
-    canonical: seoNode.canonical,
-    ogImage: seoNode.image,
-  } : undefined;
+  const seo = seoNode
+    ? {
+        title: seoNode.title,
+        description: seoNode.description,
+        canonical: seoNode.canonical,
+        ogImage: seoNode.image,
+      }
+    : undefined;
 
   return { status: 200, headers, body, bodyContent: html, initialState, seo };
 }

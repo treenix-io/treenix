@@ -6,7 +6,10 @@ import type { TypeValidator } from '@treenx/core/comp/validate';
  *  Rejects: non-objects, null, wrong $type, garbage shapes, missing slotType (pack bug). */
 export const refOrComponentValidator: TypeValidator = (value, def, path, errors) => {
   if (value == null || typeof value !== 'object') {
-    errors.push({ path, message: `expected ref or typed component, got ${value === null ? 'null' : typeof value}` });
+    errors.push({
+      path,
+      message: `expected ref or typed component, got ${value === null ? 'null' : typeof value}`,
+    });
     return;
   }
 

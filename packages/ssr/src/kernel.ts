@@ -4,14 +4,28 @@ import site from './types/schemas/t.site.json' with { type: 'json' };
 import seo from './types/schemas/t.seo.json' with { type: 'json' };
 
 // Unversioned markers have the same fields as the initial native schemas.
-const migrations: readonly Migration[] = [{ from: 0, to: 1, up: component => component }];
+const migrations: readonly Migration[] = [{ from: 0, to: 1, up: (component) => component }];
 
 /** Native ownership for the existing SSR marker components. */
 export const ssrModule: ModuleManifest = {
   id: '@treenx/ssr',
   types: [
-    { name: 't.site', module: '@treenx/ssr', security: 'ordinary', schema: site, version: 1, actions: {} },
-    { name: 't.seo', module: '@treenx/ssr', security: 'ordinary', schema: seo, version: 1, actions: {} },
+    {
+      name: 't.site',
+      module: '@treenx/ssr',
+      security: 'ordinary',
+      schema: site,
+      version: 1,
+      actions: {},
+    },
+    {
+      name: 't.seo',
+      module: '@treenx/ssr',
+      security: 'ordinary',
+      schema: seo,
+      version: 1,
+      actions: {},
+    },
   ],
   security: [
     { type: 't.site', context: 'migrate', handler: migrations },

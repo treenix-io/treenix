@@ -21,7 +21,7 @@ const HTML_ESCAPES: Record<string, string> = {
 };
 
 export function escape(s: string): string {
-  return s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
+  return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
 /** Same as escape — kept as a separate name to make intent explicit at callsites. */
@@ -95,26 +95,40 @@ export function buildHtmlShell({
 }: ShellInput): string {
   const rendered = extractBodyHeadHints(html);
   const title = escape(seo?.title ?? '');
-  const description = seo?.description ? `<meta name="description" content="${escapeAttr(seo.description)}" />` : '';
-  const canonical = seo?.canonical ? `<link rel="canonical" href="${escapeUrl(seo.canonical)}" />` : '';
+  const description = seo?.description
+    ? `<meta name="description" content="${escapeAttr(seo.description)}" />`
+    : '';
+  const canonical = seo?.canonical
+    ? `<link rel="canonical" href="${escapeUrl(seo.canonical)}" />`
+    : '';
   // Preview always forces noindex regardless of seo.robots.
   const robots = isPreview
     ? '<meta name="robots" content="noindex,nofollow" />'
-    : (seo?.robots ? `<meta name="robots" content="${seo.robots}" />` : '');
+    : seo?.robots
+      ? `<meta name="robots" content="${seo.robots}" />`
+      : '';
   const ogTitle = title ? `<meta property="og:title" content="${escapeAttr(seo!.title)}" />` : '';
-  const ogImage = seo?.image ? `<meta property="og:image" content="${escapeUrl(seo.image)}" />` : '';
-  const ogImageAlt = seo?.imageAlt ? `<meta property="og:image:alt" content="${escapeAttr(seo.imageAlt)}" />` : '';
+  const ogImage = seo?.image
+    ? `<meta property="og:image" content="${escapeUrl(seo.image)}" />`
+    : '';
+  const ogImageAlt = seo?.imageAlt
+    ? `<meta property="og:image:alt" content="${escapeAttr(seo.imageAlt)}" />`
+    : '';
   const ogType = seo?.type ? `<meta property="og:type" content="${seo.type}" />` : '';
-  const jsonLd = seo?.jsonLd ? `<script type="application/ld+json">${escapeJson(seo.jsonLd)}</script>` : '';
+  const jsonLd = seo?.jsonLd
+    ? `<script type="application/ld+json">${escapeJson(seo.jsonLd)}</script>`
+    : '';
   const lang = seo?.locale ? escapeAttr(seo.locale) : 'en';
   const tailwindCdn = tailwindRuntime ? `<script src="${TAILWIND_CDN}"></script>` : '';
   const headHints = rendered.headHints.join('\n');
-  const initialJson = mode === 'hydrate' && initialState !== undefined
-    ? `<script type="application/json" id="treenix-initial">${escapeJson(initialState)}</script>`
-    : '';
-  const hydrateScript = mode === 'hydrate' && hydrateScriptUrl
-    ? `<script type="module" src="${escapeUrl(hydrateScriptUrl)}"></script>`
-    : '';
+  const initialJson =
+    mode === 'hydrate' && initialState !== undefined
+      ? `<script type="application/json" id="treenix-initial">${escapeJson(initialState)}</script>`
+      : '';
+  const hydrateScript =
+    mode === 'hydrate' && hydrateScriptUrl
+      ? `<script type="module" src="${escapeUrl(hydrateScriptUrl)}"></script>`
+      : '';
   const previewBanner = isPreview
     ? '<div data-treenix-preview style="position:fixed;top:0;left:0;right:0;background:#facc15;color:#000;padding:4px 12px;font:12px monospace;z-index:9999">Preview (draft)</div>'
     : '';

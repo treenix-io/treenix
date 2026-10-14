@@ -4,7 +4,10 @@ import { refOrComponentValidator } from './validator';
 import type { ValidationError } from '@treenx/core/comp/validate';
 import type { PropertySchema } from '@treenx/core/schema/types';
 
-const slotDef = { type: 'jsonld.refOrComponent', slotType: 'jsonld.schema-org.PostalAddress' } as unknown as PropertySchema;
+const slotDef = {
+  type: 'jsonld.refOrComponent',
+  slotType: 'jsonld.schema-org.PostalAddress',
+} as unknown as PropertySchema;
 
 function validate(value: unknown): ValidationError[] {
   const errors: ValidationError[] = [];
@@ -22,7 +25,10 @@ describe('refOrComponentValidator', () => {
   });
 
   it('accepts a typed component matching the slot type', () => {
-    assert.equal(validate({ $type: 'jsonld.schema-org.PostalAddress', streetAddress: '1 Way' }).length, 0);
+    assert.equal(
+      validate({ $type: 'jsonld.schema-org.PostalAddress', streetAddress: '1 Way' }).length,
+      0,
+    );
   });
 
   it('rejects an object whose $type is not the slot type', () => {
@@ -53,7 +59,12 @@ describe('refOrComponentValidator', () => {
   it('flags a pack bug if slotType is missing on the schema definition', () => {
     const badDef = { type: 'jsonld.refOrComponent' } as unknown as PropertySchema;
     const errors: ValidationError[] = [];
-    refOrComponentValidator({ $type: 'jsonld.schema-org.PostalAddress' }, badDef as any, 'address', errors);
+    refOrComponentValidator(
+      { $type: 'jsonld.schema-org.PostalAddress' },
+      badDef as any,
+      'address',
+      errors,
+    );
     assert.equal(errors.length, 1);
     assert.match(errors[0].message, /slotType/);
   });

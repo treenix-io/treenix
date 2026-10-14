@@ -22,7 +22,8 @@ export type ViteSsrOpts = {
   apiUrl?: string;
 };
 
-const ASSET_EXT = /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|ico|webp|avif|woff|woff2|ttf|otf|json|wasm|txt|xml)(\?|$)/i;
+const ASSET_EXT =
+  /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|ico|webp|avif|woff|woff2|ttf|otf|json|wasm|txt|xml)(\?|$)/i;
 
 function isHtmlRequest(req: IncomingMessage): boolean {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
@@ -38,8 +39,7 @@ function isHtmlRequest(req: IncomingMessage): boolean {
 }
 
 export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
-  const apiUrl = opts.apiUrl
-    ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '4882'}`;
+  const apiUrl = opts.apiUrl ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '4882'}`;
 
   return {
     name: 'treenix-ssr',
@@ -49,41 +49,48 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
       // PRE-hook: register before Vite's internal SPA-fallback so we see original URLs.
       // Vite still handles assets/HMR/etc. via its own middlewares — we just delegate via next().
       vite.middlewares.use(async (req, res, next) => {
-          if (!isHtmlRequest(req)) return next();
-          const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-          if (url.searchParams.get('ssr') === '0') return next();
+        if (!isHtmlRequest(req)) return next();
+        const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+        if (url.searchParams.get('ssr') === '0') return next();
 
-          let session: Awaited<ReturnType<typeof openSsrSession>> | undefined;
-          try {
-            session = await openSsrSession(apiUrl, req, res);
-            const routes = new RouteIndex();
-            routes.hydrate(await fetchRouteNodes(session.reader));
-            const mod = await vite.ssrLoadModule('@treenx/react/ssr/entry-server');
-            const render = mod.render as RenderFn;
+        let session: Awaited<ReturnType<typeof openSsrSession>> | undefined;
+        try {
+          session = await openSsrSession(apiUrl, req, res);
+          const routes = new RouteIndex();
+          routes.hydrate(await fetchRouteNodes(session.reader));
+          const mod = await vite.ssrLoadModule('@treenx/react/ssr/entry-server');
+          const render = mod.render as RenderFn;
 
-            const result = await ssrHandler(
-              { pathname: url.pathname, query: url.searchParams, isAdmin: false, private: session.private },
-              { routes, reader: session.reader, render },
-            );
-            if (!result) return next();
+          const result = await ssrHandler(
+            {
+              pathname: url.pathname,
+              query: url.searchParams,
+              isAdmin: false,
+              private: session.private,
+            },
+            { routes, reader: session.reader, render },
+          );
+          if (!result) return next();
 
-            // Canonical Vite SSR pattern — use the SPA index.html as the
-            // template so client `main.tsx` and asset URLs land in the right
-            // places. Inject SSR'd markup into the existing #root, head meta,
-            // and a <script id="treenix-initial"> for client hydration.
-            const indexPath = resolve(vite.config.root, 'index.html');
-            let template = await readFile(indexPath, 'utf-8');
-            template = await vite.transformIndexHtml(req.url ?? '/', template);
-            const html = injectSsrIntoTemplate(template, result);
+          // Canonical Vite SSR pattern — use the SPA index.html as the
+          // template so client `main.tsx` and asset URLs land in the right
+          // places. Inject SSR'd markup into the existing #root, head meta,
+          // and a <script id="treenix-initial"> for client hydration.
+          const indexPath = resolve(vite.config.root, 'index.html');
+          let template = await readFile(indexPath, 'utf-8');
+          template = await vite.transformIndexHtml(req.url ?? '/', template);
+          const html = injectSsrIntoTemplate(template, result);
 
-            res.statusCode = result.status;
-            for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
-            res.end(html);
-          } catch (err) {
-            vite.ssrFixStacktrace(err as Error);
-            next(err as Error);
-          } finally { session?.close(); }
-        });
+          res.statusCode = result.status;
+          for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
+          res.end(html);
+        } catch (err) {
+          vite.ssrFixStacktrace(err as Error);
+          next(err as Error);
+        } finally {
+          session?.close();
+        }
+      });
     },
   };
 }
@@ -95,24 +102,33 @@ const HEAD_CLOSE = /<\/head>/i;
 
 function injectSsrIntoTemplate(
   template: string,
-  result: { bodyContent: string; initialState: unknown; seo?: { title?: string; description?: string; canonical?: string; ogImage?: string } },
+  result: {
+    bodyContent: string;
+    initialState: unknown;
+    seo?: { title?: string; description?: string; canonical?: string; ogImage?: string };
+  },
 ): string {
   // 1. Body: replace `<div id="root">` opening so its content becomes our SSR markup.
   const rendered = extractBodyHeadHints(result.bodyContent);
-  let html = template.replace(ROOT_OPEN, m => `${m}${rendered.body}`);
+  let html = template.replace(ROOT_OPEN, (m) => `${m}${rendered.body}`);
 
   // 2. Head meta — title overrides any in template; description/canonical/og added.
   // <base href="/"> forces all relative URLs in index.html (favicons, /src/app/main.tsx)
   // to resolve from origin root regardless of the SSR'd page's URL depth (/v/foo/bar).
   const headBits: string[] = ['<base href="/" />'];
   if (result.seo?.title) headBits.push(`<title>${escape(result.seo.title)}</title>`);
-  if (result.seo?.description) headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
-  if (result.seo?.canonical) headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
-  if (result.seo?.ogImage) headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
+  if (result.seo?.description)
+    headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
+  if (result.seo?.canonical)
+    headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
+  if (result.seo?.ogImage)
+    headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
   headBits.push(...rendered.headHints);
 
   // 3. Initial state — pre-seeded into client TreeSource on hydration.
-  headBits.push(`<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`);
+  headBits.push(
+    `<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`,
+  );
 
   if (headBits.length) {
     html = html.replace(HEAD_CLOSE, headBits.join('\n') + '\n</head>');
@@ -121,4 +137,3 @@ function injectSsrIntoTemplate(
   // Drop any duplicate <title> the SPA template had — keep ours (last wins in <head>).
   return html;
 }
-

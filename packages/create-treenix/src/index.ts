@@ -5,10 +5,12 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { modCreate } from './mod-create';
 
-const STARTER_URL = process.env.TREENIX_STARTER_URL
-  ?? 'https://codeload.github.com/treenix-io/starter/tar.gz/refs/heads/main';
-const DOCS_URL = process.env.TREENIX_DOCS_URL
-  ?? 'https://codeload.github.com/treenix-io/treenix/tar.gz/refs/heads/main';
+const STARTER_URL =
+  process.env.TREENIX_STARTER_URL ??
+  'https://codeload.github.com/treenix-io/starter/tar.gz/refs/heads/main';
+const DOCS_URL =
+  process.env.TREENIX_DOCS_URL ??
+  'https://codeload.github.com/treenix-io/treenix/tar.gz/refs/heads/main';
 
 async function downloadStarter(targetDir: string) {
   mkdirSync(targetDir, { recursive: true });
@@ -64,13 +66,18 @@ async function downloadDocs(targetDir: string) {
     // Move/overlay onto targetDir/docs
     const src = join(tmpExtract, 'docs');
     if (existsSync(src)) {
-      execSync(`mkdir -p "${join(targetDir, 'docs')}" && cp -R "${src}/." "${join(targetDir, 'docs')}/"`, {
-        stdio: 'ignore',
-        shell: '/bin/bash',
-      });
+      execSync(
+        `mkdir -p "${join(targetDir, 'docs')}" && cp -R "${src}/." "${join(targetDir, 'docs')}/"`,
+        {
+          stdio: 'ignore',
+          shell: '/bin/bash',
+        },
+      );
     }
   } catch (e) {
-    log.warn(`Could not fetch docs from main repo (${(e as Error).message}); keeping starter docs only`);
+    log.warn(
+      `Could not fetch docs from main repo (${(e as Error).message}); keeping starter docs only`,
+    );
   } finally {
     rmSync(tgz, { force: true });
     rmSync(tmpExtract, { recursive: true, force: true });
@@ -85,7 +92,12 @@ function rewritePackageName(targetDir: string, name: string) {
 }
 
 function normalizeName(raw: string): string {
-  return basename(raw).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'treenix-app';
+  return (
+    basename(raw)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/^-+|-+$/g, '') || 'treenix-app'
+  );
 }
 
 function detectPm(): 'npm' | 'pnpm' | 'bun' {
@@ -109,7 +121,7 @@ if (sub === 'mod') {
     process.exit(1);
   }
   const yes = process.argv.includes('-y') || process.argv.includes('--yes');
-  const rest = process.argv.slice(4).filter(a => !a.startsWith('-'));
+  const rest = process.argv.slice(4).filter((a) => !a.startsWith('-'));
   intro('create-treenix mod');
   await modCreate(rest, yes);
   outro('Done!');
@@ -136,7 +148,9 @@ if (sub === 'start') {
     s.stop('Starter ready.');
 
     log.step(`Installing dependencies (one-time) via ${pm}...`);
-    try { installDeps(playDir, pm); } catch {
+    try {
+      installDeps(playDir, pm);
+    } catch {
       log.error(`Install failed. Run \`${pm} install\` in ${playDir}`);
       process.exit(1);
     }
@@ -153,7 +167,7 @@ if (sub === 'start') {
 // --- Default: create-treenix [name] [-y] ---
 const args = process.argv.slice(2);
 const yes = args.includes('-y') || args.includes('--yes');
-const rawName = args.find(a => !a.startsWith('-'));
+const rawName = args.find((a) => !a.startsWith('-'));
 
 if (!yes) intro('create-treenix');
 
@@ -162,9 +176,12 @@ if (!input && !yes) {
   const result = await text({
     message: 'Project name',
     placeholder: 'my-treenix-app',
-    validate: v => v.length === 0 ? 'Required' : undefined,
+    validate: (v) => (v.length === 0 ? 'Required' : undefined),
   });
-  if (isCancel(result)) { cancel(); process.exit(0); }
+  if (isCancel(result)) {
+    cancel();
+    process.exit(0);
+  }
   input = String(result);
 }
 input ??= 'my-treenix-app';

@@ -2,7 +2,12 @@ import { KernelError } from '@treenx/core/errors';
 import type { ErrorCopy, Reader, ReadResult, SubSelector } from '@treenx/core/kernel/types';
 import { readSnapshot, type NativeHydrationState } from '@treenx/react/tree/read-snapshot';
 import type { NativeMount, NativeSnapshot } from '@treenx/react/tree/native-source';
-import type { ChildrenOpts, ChildrenSnapshot, PathSnapshot, TreeSource } from '@treenx/react/tree/tree-source';
+import type {
+  ChildrenOpts,
+  ChildrenSnapshot,
+  PathSnapshot,
+  TreeSource,
+} from '@treenx/react/tree/tree-source';
 
 interface Resource {
   readonly selector: SubSelector;
@@ -34,8 +39,11 @@ export class ServerTreeSource implements TreeSource {
   }
 
   private childSelector(path: string, options?: ChildrenOpts): SubSelector {
-    return { children: path, window: { limit: options?.limit ?? 100 },
-      ...(options?.query === undefined ? {} : { where: options.query }) };
+    return {
+      children: path,
+      window: { limit: options?.limit ?? 100 },
+      ...(options?.query === undefined ? {} : { where: options.query }),
+    };
   }
 
   getPathSnapshot(path: string): PathSnapshot {
@@ -44,11 +52,29 @@ export class ServerTreeSource implements TreeSource {
     const snapshot = resource.snapshot;
     const member = snapshot.output?.[0];
     if (member?.kind === 'copy' && 'error' in member.copy)
-      return resource.path = { data: undefined, status: 'error', error: new KernelError(member.copy.error.code, member.copy.error.message) };
-    const data = member?.kind === 'computed' ? member.node
-      : member !== undefined && 'node' in member.copy ? member.copy.node : undefined;
-    return resource.path = { data, error: snapshot.error ?? null, status: snapshot.phase === 'loading' ? 'loading'
-      : snapshot.error !== undefined ? 'error' : data === undefined ? 'not_found' : 'ready' };
+      return (resource.path = {
+        data: undefined,
+        status: 'error',
+        error: new KernelError(member.copy.error.code, member.copy.error.message),
+      });
+    const data =
+      member?.kind === 'computed'
+        ? member.node
+        : member !== undefined && 'node' in member.copy
+          ? member.copy.node
+          : undefined;
+    return (resource.path = {
+      data,
+      error: snapshot.error ?? null,
+      status:
+        snapshot.phase === 'loading'
+          ? 'loading'
+          : snapshot.error !== undefined
+            ? 'error'
+            : data === undefined
+              ? 'not_found'
+              : 'ready',
+    });
   }
 
   getChildrenSnapshot(path: string, options?: ChildrenOpts): ChildrenSnapshot {
@@ -62,31 +88,58 @@ export class ServerTreeSource implements TreeSource {
       else if ('error' in member.copy) errors.push(member.copy);
       else data.push(member.copy.node);
     }
-    return resource.children = { data, errors, phase: snapshot.phase === 'loading' ? 'initial' : snapshot.phase,
-      error: snapshot.error ?? null, nextCursor: snapshot.next ?? null };
+    return (resource.children = {
+      data,
+      errors,
+      phase: snapshot.phase === 'loading' ? 'initial' : snapshot.phase,
+      error: snapshot.error ?? null,
+      nextCursor: snapshot.next ?? null,
+    });
   }
 
-  subscribePath() { return noop; }
-  subscribeChildren() { return noop; }
-  mountPath(path: string) { this.resource({ node: path }); return { refetch: noop, dispose: noop }; }
+  subscribePath() {
+    return noop;
+  }
+  subscribeChildren() {
+    return noop;
+  }
+  mountPath(path: string) {
+    this.resource({ node: path });
+    return { refetch: noop, dispose: noop };
+  }
   mountChildren(path: string, options?: ChildrenOpts) {
     this.resource(this.childSelector(path, options));
-    return { getSnapshot: () => this.getChildrenSnapshot(path, options), subscribe: () => noop,
-      loadMore: noop, refetch: noop, dispose: noop };
+    return {
+      getSnapshot: () => this.getChildrenSnapshot(path, options),
+      subscribe: () => noop,
+      loadMore: noop,
+      refetch: noop,
+      dispose: noop,
+    };
   }
-  getSelectorSnapshot(selector: SubSelector) { return this.resource(selector).snapshot; }
+  getSelectorSnapshot(selector: SubSelector) {
+    return this.resource(selector).snapshot;
+  }
   mountSelector(selector: SubSelector): NativeMount {
     const resource = this.resource(selector);
-    return { getSnapshot: () => resource.snapshot, subscribe: () => noop,
-      loadMore: noop, refetch: noop, dispose: noop };
+    return {
+      getSnapshot: () => resource.snapshot,
+      subscribe: () => noop,
+      loadMore: noop,
+      refetch: noop,
+      dispose: noop,
+    };
   }
 
   /** Return how many reads still need to be flushed. */
-  pendingCount() { return this.pendingReads.size; }
+  pendingCount() {
+    return this.pendingReads.size;
+  }
 
   /** List pending path and child reads for the unresolved-render error. */
   pending() {
-    const paths: string[] = [], children: string[] = [];
+    const paths: string[] = [],
+      children: string[] = [];
     for (const resource of this.pendingReads)
       if ('node' in resource.selector) paths.push(resource.selector.node);
       else children.push(resource.selector.children);
@@ -97,19 +150,23 @@ export class ServerTreeSource implements TreeSource {
   async flushPending(): Promise<void> {
     const pending = [...this.pendingReads];
     this.pendingReads.clear();
-    await Promise.all(pending.map(async resource => {
-      const result = await this.reader.read(resource.selector);
-      resource.snapshot = readSnapshot(result);
-      resource.result = result;
-      resource.path = undefined; resource.children = undefined;
-    }));
+    await Promise.all(
+      pending.map(async (resource) => {
+        const result = await this.reader.read(resource.selector);
+        resource.snapshot = readSnapshot(result);
+        resource.result = result;
+        resource.path = undefined;
+        resource.children = undefined;
+      }),
+    );
   }
 
   /** Serialize completed native reads for the client hydration cache. */
   serialize(): NativeHydrationState {
     const reads: NativeHydrationState['reads'][number][] = [];
     for (const resource of this.resources.values()) {
-      if (resource.result === undefined) throw new KernelError('INVALID', 'Hydration contains an unresolved read');
+      if (resource.result === undefined)
+        throw new KernelError('INVALID', 'Hydration contains an unresolved read');
       reads.push({ selector: resource.selector, result: resource.result });
     }
     return { reads };

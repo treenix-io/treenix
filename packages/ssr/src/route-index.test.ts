@@ -21,10 +21,7 @@ describe('RouteIndex', () => {
 
   it('falls through to wildcard when no exact match', () => {
     const idx = new RouteIndex();
-    idx.hydrate([
-      route('/sys/routes/v', 't.view.shell', true),
-      route('/sys/routes/about', 'page'),
-    ]);
+    idx.hydrate([route('/sys/routes/v', 't.view.shell', true), route('/sys/routes/about', 'page')]);
     const r = idx.resolve('/v/foo/bar');
     assert.equal(r!.node.$path, '/sys/routes/v');
     assert.equal(r!.rest, 'foo/bar');

@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test';
 
 test('app loads without JS errors', async ({ page }) => {
   const jsErrors: string[] = [];
-  page.on('pageerror', err => jsErrors.push(err.message));
+  page.on('pageerror', (err) => jsErrors.push(err.message));
 
   await page.goto('/t/demo');
   await page.waitForTimeout(3_000);

@@ -11,7 +11,13 @@ it('recognizes actual owned transaction tuples before settlement and after reope
   const uri = process.env.NATIVE_MONGO_TEST_URI;
   assert.ok(uri);
   const database = `owned_stream_${randomUUID().replaceAll('-', '')}`;
-  const options = { uri, domain: database, instance: 'test', journalDb: database, journalCollection: 'journal' };
+  const options = {
+    uri,
+    domain: database,
+    instance: 'test',
+    journalDb: database,
+    journalCollection: 'journal',
+  };
   const pool = getSharedClient(uri, true);
   const observed: OwnedTransaction[] = [];
   let currentOwner: MongoTransactionOwner | undefined;
@@ -23,10 +29,11 @@ it('recognizes actual owned transaction tuples before settlement and after reope
     const transaction = wireTransaction(event.command.lsid, event.command.txnNumber);
     observed.push(transaction);
     const captured = currentOwner;
-    if (captured !== undefined && pending === undefined) pending = Promise.resolve().then(() => {
-      assert.equal(settled, false);
-      return captured.ownsTransaction(transaction, scanBudget());
-    });
+    if (captured !== undefined && pending === undefined)
+      pending = Promise.resolve().then(() => {
+        assert.equal(settled, false);
+        return captured.ownsTransaction(transaction, scanBudget());
+      });
   }
   pool.client.on('commandStarted', observe);
   const owner = await openMongoTransactionOwner(options);
@@ -39,10 +46,22 @@ it('recognizes actual owned transaction tuples before settlement and after reope
     assert.equal(await pending, true);
     assert.ok(observed.length > 0);
     const transaction = observed[0];
-    assert.ok(observed.every(value => transactionKey(value) === transactionKey(transaction)));
+    assert.ok(observed.every((value) => transactionKey(value) === transactionKey(transaction)));
     assert.equal(await owner.ownsTransaction(transaction, scanBudget()), true);
-    assert.equal(await owner.ownsTransaction({ ...transaction, number: transaction.number.add(Long.ONE) }, scanBudget()), false);
-    assert.equal(await owner.ownsTransaction({ ...transaction, session: new Binary(randomBytes(16), Binary.SUBTYPE_UUID) }, scanBudget()), false);
+    assert.equal(
+      await owner.ownsTransaction(
+        { ...transaction, number: transaction.number.add(Long.ONE) },
+        scanBudget(),
+      ),
+      false,
+    );
+    assert.equal(
+      await owner.ownsTransaction(
+        { ...transaction, session: new Binary(randomBytes(16), Binary.SUBTYPE_UUID) },
+        scanBudget(),
+      ),
+      false,
+    );
     await store.close();
     await owner.close();
     const reopened = await openMongoTransactionOwner(options);

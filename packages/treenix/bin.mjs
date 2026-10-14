@@ -64,10 +64,14 @@ if (!existsSync(serverPath)) {
 console.log('\n  Starting Treenix...\n');
 
 // Start server
-const server = spawn('npx', ['tsx', '--conditions', 'development', '--watch', serverPath, 'root.json'], {
-  stdio: 'inherit',
-  cwd: process.cwd(),
-});
+const server = spawn(
+  'npx',
+  ['tsx', '--conditions', 'development', '--watch', serverPath, 'root.json'],
+  {
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  },
+);
 
 // Start frontend if @treenx/react is available
 const frontPkg = resolve('engine/packages/react/package.json');

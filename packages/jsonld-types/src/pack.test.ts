@@ -13,7 +13,7 @@ function owningTypes() {
 const declaredTypes = owningTypes();
 
 function personReader() {
-  const person = declaredTypes.find(type => type.type === 'jsonld.schema-org.Person');
+  const person = declaredTypes.find((type) => type.type === 'jsonld.schema-org.Person');
   assert.ok(person);
   assert.ok(person.kind === 'schema', 'Person owner must declare a schema');
   return person.createReader();
@@ -28,12 +28,15 @@ function nativeRegistry() {
 describe('owned Schema.org pack', () => {
   it('declares curated client and native schemas without global publication', () => {
     const manifest = schemaOrgV29NativeManifest();
-    assert.ok(manifest.types.some(type => type.name === 'jsonld.schema-org.Person'));
-    assert.ok(manifest.types.some(type => type.name === 'jsonld.schema-org.Event'));
+    assert.ok(manifest.types.some((type) => type.name === 'jsonld.schema-org.Person'));
+    assert.ok(manifest.types.some((type) => type.name === 'jsonld.schema-org.Event'));
     const schema = personReader().schema();
     assert.ok(schema);
     assert.equal(schema.$id, 'jsonld.schema-org.Person');
-    assert.equal(declaredTypes.some(type => type.type === 'some.other.type'), false);
+    assert.equal(
+      declaredTypes.some((type) => type.type === 'some.other.type'),
+      false,
+    );
   });
 
   it('memoizes within the owning schema reader', () => {
@@ -49,16 +52,26 @@ describe('owned Schema.org pack', () => {
   });
 
   it('accepts a Person through the native owned schema', () => {
-    assert.doesNotThrow(() => assertNodeSchema({ $type: 'jsonld.schema-org.Person', $v: 0, name: 'Alice' }, nativeRegistry()));
+    assert.doesNotThrow(() =>
+      assertNodeSchema(
+        { $type: 'jsonld.schema-org.Person', $v: 0, name: 'Alice' },
+        nativeRegistry(),
+      ),
+    );
   });
 
   it('rejects scalar type mismatch (AC9)', () => {
-    assert.throws(() => assertNodeSchema({ $type: 'jsonld.schema-org.Person', $v: 0, name: 42 }, nativeRegistry()),
-      (error: unknown) => error instanceof KernelError && error.code === 'INVALID');
+    assert.throws(
+      () =>
+        assertNodeSchema({ $type: 'jsonld.schema-org.Person', $v: 0, name: 42 }, nativeRegistry()),
+      (error: unknown) => error instanceof KernelError && error.code === 'INVALID',
+    );
   });
 
   it('rejects missing required (AC12)', () => {
-    assert.throws(() => assertNodeSchema({ $type: 'jsonld.schema-org.Person', $v: 0 }, nativeRegistry()),
-      (error: unknown) => error instanceof KernelError && error.code === 'INVALID');
+    assert.throws(
+      () => assertNodeSchema({ $type: 'jsonld.schema-org.Person', $v: 0 }, nativeRegistry()),
+      (error: unknown) => error instanceof KernelError && error.code === 'INVALID',
+    );
   });
 });

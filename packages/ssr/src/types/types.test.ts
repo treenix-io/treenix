@@ -9,7 +9,7 @@ import './index';
 
 const SCHEMAS = join(dirname(fileURLToPath(import.meta.url)), 'schemas');
 
-const schemas = new Map(readSchemasFromDir(SCHEMAS).map(schema => [schema.$id, schema]));
+const schemas = new Map(readSchemasFromDir(SCHEMAS).map((schema) => [schema.$id, schema]));
 
 function getSchema(type: string): TypeSchema {
   const schema = schemas.get(type);
@@ -18,12 +18,12 @@ function getSchema(type: string): TypeSchema {
 }
 
 describe('@treenx/ssr — t.site / t.seo schemas', () => {
-
   describe('t.site', () => {
     it('accepts a published static site', () => {
       const errs = validateComponent(
         { $type: 't.site', state: 'published', mode: 'static' },
-        getSchema('t.site'), 'site',
+        getSchema('t.site'),
+        'site',
       );
       assert.deepEqual(errs, []);
     });
@@ -31,53 +31,54 @@ describe('@treenx/ssr — t.site / t.seo schemas', () => {
     it('rejects unknown mode', () => {
       const errs = validateComponent(
         { $type: 't.site', state: 'draft', mode: 'fast' as 'static' },
-        getSchema('t.site'), 'site',
+        getSchema('t.site'),
+        'site',
       );
-      assert.ok(errs.some(e => e.path.endsWith('.mode')));
+      assert.ok(errs.some((e) => e.path.endsWith('.mode')));
     });
 
     it('rejects unknown state', () => {
       const errs = validateComponent(
         { $type: 't.site', state: 'live' as 'draft', mode: 'static' },
-        getSchema('t.site'), 'site',
+        getSchema('t.site'),
+        'site',
       );
-      assert.ok(errs.some(e => e.path.endsWith('.state')));
+      assert.ok(errs.some((e) => e.path.endsWith('.state')));
     });
 
     it('flags missing required fields', () => {
       const errs = validateComponent(
         { $type: 't.site' } as { $type: 't.site'; state: 'draft'; mode: 'spa' },
-        getSchema('t.site'), 'site',
+        getSchema('t.site'),
+        'site',
       );
-      const missing = errs.map(e => e.path).sort();
+      const missing = errs.map((e) => e.path).sort();
       assert.deepEqual(missing, ['site.mode', 'site.state']);
     });
   });
 
   describe('t.seo', () => {
     it('accepts minimal seo with title only', () => {
-      const errs = validateComponent(
-        { $type: 't.seo', title: 'Hello' },
-        getSchema('t.seo'), 'seo',
-      );
+      const errs = validateComponent({ $type: 't.seo', title: 'Hello' }, getSchema('t.seo'), 'seo');
       assert.deepEqual(errs, []);
     });
 
     it('rejects missing title', () => {
       const errs = validateComponent(
         { $type: 't.seo' } as { $type: 't.seo'; title: string },
-        getSchema('t.seo'), 'seo',
+        getSchema('t.seo'),
+        'seo',
       );
-      assert.ok(errs.some(e => e.path === 'seo.title'));
+      assert.ok(errs.some((e) => e.path === 'seo.title'));
     });
 
     it('rejects unknown robots value', () => {
       const errs = validateComponent(
         { $type: 't.seo', title: 'x', robots: 'allow' as 'index,follow' },
-        getSchema('t.seo'), 'seo',
+        getSchema('t.seo'),
+        'seo',
       );
-      assert.ok(errs.some(e => e.path.endsWith('.robots')));
+      assert.ok(errs.some((e) => e.path.endsWith('.robots')));
     });
   });
-
 });

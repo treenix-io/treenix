@@ -7,13 +7,19 @@ const config: KnipConfig = {
       entry: ['scripts/*.ts'],
       ignoreDependencies: [
         // d3 used by mods (mindmap, three) — hoisted to root
-        'd3-hierarchy', 'd3-selection', 'd3-shape', 'd3-transition', 'd3-zoom',
-        '@types/d3-selection', '@types/d3-transition', '@types/d3-zoom',
+        'd3-hierarchy',
+        'd3-selection',
+        'd3-shape',
+        'd3-transition',
+        'd3-zoom',
+        '@types/d3-selection',
+        '@types/d3-transition',
+        '@types/d3-zoom',
       ],
     },
 
     // Core — public server entry, native discovery, and worker boundaries.
-    'core': {
+    core: {
       entry: [
         'src/server/main.ts',
         'src/server/native-main.ts',
@@ -33,7 +39,10 @@ const config: KnipConfig = {
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
         // cross-package peers resolved at runtime
-        '@treenx/react', 'dayjs', 'eventsource', 'reflect-metadata',
+        '@treenx/react',
+        'dayjs',
+        'eventsource',
+        'reflect-metadata',
       ],
     },
 
@@ -51,13 +60,13 @@ const config: KnipConfig = {
       ],
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
-        '@tailwindcss/vite',  // vite plugin, not a direct import
-        '@treenx/react',    // self-reference in package.json
+        '@tailwindcss/vite', // vite plugin, not a direct import
+        '@treenx/react', // self-reference in package.json
       ],
     },
 
     // Mods — dynamically loaded by mod loader
-    'mods': {
+    mods: {
       entry: [
         'clients.ts',
         '*/client.ts',
@@ -83,11 +92,7 @@ const config: KnipConfig = {
   },
 
   // shadcn UI components — used on demand, not all statically imported
-  ignore: [
-    'core/src/lab/**',
-    '**/components/ui/**',
-    '**/components/lib/**',
-  ],
+  ignore: ['core/src/lab/**', '**/components/ui/**', '**/components/lib/**'],
 
   ignoreWorkspaces: [],
 };

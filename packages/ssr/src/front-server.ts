@@ -34,7 +34,7 @@ const routeTtlMs = Number(process.env.ROUTE_TTL_MS ?? 30_000);
 // Defaults resolve relative to THIS file (works for src/dev, dist/, and
 // node_modules installs — independent of CWD).
 const here = dirname(fileURLToPath(import.meta.url));
-const pkgRoot = resolve(here, '..');                              // src→pkg, dist→pkg
+const pkgRoot = resolve(here, '..'); // src→pkg, dist→pkg
 const require_ = createRequire(import.meta.url);
 const reactPkgDir = dirname(dirname(require_.resolve('@treenx/react')));
 
@@ -54,14 +54,28 @@ if (!existsSync(ssrBundle)) {
 const indexHtml = readFileSync(indexHtmlPath, 'utf-8');
 const { render } = (await import(pathToFileURL(ssrBundle).href)) as { render: RenderFn };
 const MIME: Record<string, string> = {
-  '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript',
-  '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-  '.ico': 'image/x-icon', '.webp': 'image/webp', '.avif': 'image/avif',
-  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
-  '.map': 'application/json', '.wasm': 'application/wasm', '.txt': 'text/plain',
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.map': 'application/json',
+  '.wasm': 'application/wasm',
+  '.txt': 'text/plain',
 };
-const ASSET_EXT = /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|ico|webp|avif|woff|woff2|ttf|otf|json|wasm|txt|xml)(\?|$)/i;
+const ASSET_EXT =
+  /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|ico|webp|avif|woff|woff2|ttf|otf|json|wasm|txt|xml)(\?|$)/i;
 
 function serveStatic(pathname: string, res: http.ServerResponse): boolean {
   const file = resolve(join(clientDir, pathname));
@@ -90,20 +104,29 @@ const HEAD_CLOSE = /<\/head>/i;
 
 function injectSsrIntoTemplate(
   template: string,
-  result: { bodyContent: string; initialState: unknown; seo?: { title?: string; description?: string; canonical?: string; ogImage?: string } },
+  result: {
+    bodyContent: string;
+    initialState: unknown;
+    seo?: { title?: string; description?: string; canonical?: string; ogImage?: string };
+  },
 ): string {
   const rendered = extractBodyHeadHints(result.bodyContent);
-  let html = template.replace(ROOT_OPEN, m => `${m}${rendered.body}`);
+  let html = template.replace(ROOT_OPEN, (m) => `${m}${rendered.body}`);
   // <base> MUST come before any <link>/<script> with a relative URL — per HTML
   // spec it only affects URLs that follow it. Inject right after <head> open.
-  html = html.replace(HEAD_OPEN, m => `${m}\n<base href="/" />`);
+  html = html.replace(HEAD_OPEN, (m) => `${m}\n<base href="/" />`);
   const headBits: string[] = [];
   if (result.seo?.title) headBits.push(`<title>${escape(result.seo.title)}</title>`);
-  if (result.seo?.description) headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
-  if (result.seo?.canonical) headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
-  if (result.seo?.ogImage) headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
+  if (result.seo?.description)
+    headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
+  if (result.seo?.canonical)
+    headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
+  if (result.seo?.ogImage)
+    headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
   headBits.push(...rendered.headHints);
-  headBits.push(`<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`);
+  headBits.push(
+    `<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`,
+  );
   return html.replace(HEAD_CLOSE, headBits.join('\n') + '\n</head>');
 }
 
@@ -157,7 +180,12 @@ const server = http.createServer(async (req, res) => {
       routes.hydrate(await fetchRouteNodes(session.reader));
       const parsed = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
       const ssr = await ssrHandler(
-        { pathname: parsed.pathname, query: parsed.searchParams, isAdmin: false, private: session.private },
+        {
+          pathname: parsed.pathname,
+          query: parsed.searchParams,
+          isAdmin: false,
+          private: session.private,
+        },
         { routes, reader: session.reader, render },
       );
       if (ssr) {
@@ -171,7 +199,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
       res.end('Rendering unavailable');
       return;
-    } finally { session?.close(); }
+    } finally {
+      session?.close();
+    }
 
     // SPA fallback — serve plain index.html, client takes over.
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
@@ -184,8 +214,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`[front] http://0.0.0.0:${port}  api=${apiUrl}  client=${clientDir}  ssr=${ssrBundle}`);
+  console.log(
+    `[front] http://0.0.0.0:${port}  api=${apiUrl}  client=${clientDir}  ssr=${ssrBundle}`,
+  );
 });
 
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
-
+process.on('SIGTERM', () => {
+  server.close();
+  process.exit(0);
+});

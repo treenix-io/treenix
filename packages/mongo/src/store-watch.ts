@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { KernelError } from '@treenx/core/errors';
 import { assertSafePath } from '@treenx/core';
 import type { Budget, ExternalReporter, Path } from '@treenx/core/kernel/types';
-import type { ChangeStream, CommandStartedEvent, CommandSucceededEvent, Document, MongoClient } from 'mongodb';
+import type {
+  ChangeStream,
+  CommandStartedEvent,
+  CommandSucceededEvent,
+  Document,
+  MongoClient,
+} from 'mongodb';
 import { MongoServerError } from 'mongodb';
 import { wireTransaction, type OwnedTransaction } from '#owner-transactions';
 import { locatorKey, type PhysicalLocator } from '#store-locator';
@@ -37,7 +43,10 @@ type WatchResult = { readonly event: WatchImage } | { readonly error: unknown };
 
 /** Retain a buffered cursor failure until the ordered consumer can handle it. */
 function observeNext(stream: ChangeStream<Document, WatchImage>): Promise<WatchResult> {
-  return stream.next().then(event => ({ event }), error => ({ error }));
+  return stream.next().then(
+    (event) => ({ event }),
+    (error) => ({ error }),
+  );
 }
 
 export interface ReportedDocument {
@@ -55,22 +64,39 @@ function token(value: unknown): Document {
 
 /** Keep physical node payloads out of the observed event and reject oversized metadata on the server. */
 function watchProjection(limit: number): Document[] {
-  const image = { _id: '$_id', operationType: '$operationType', documentKey: '$documentKey',
-    lsid: '$lsid', txnNumber: '$txnNumber', fullDocument: { $cond: [
-      { $eq: [{ $type: '$fullDocument' }, 'object'] },
-      { _path: '$fullDocument._path', _tid: '$fullDocument._tid', _type: '$fullDocument._type' }, null,
-    ] } };
-  return [{ $replaceWith: { $cond: [{ $lte: [{ $bsonSize: image }, limit] }, image, '$operationType'] } }];
+  const image = {
+    _id: '$_id',
+    operationType: '$operationType',
+    documentKey: '$documentKey',
+    lsid: '$lsid',
+    txnNumber: '$txnNumber',
+    fullDocument: {
+      $cond: [
+        { $eq: [{ $type: '$fullDocument' }, 'object'] },
+        { _path: '$fullDocument._path', _tid: '$fullDocument._tid', _type: '$fullDocument._type' },
+        null,
+      ],
+    },
+  };
+  return [
+    { $replaceWith: { $cond: [{ $lte: [{ $bsonSize: image }, limit] }, image, '$operationType'] } },
+  ];
 }
 
 /** Observe one native collection with a single buffered event and an exact startup command fence. */
-export function createMongoReporter(hooks: MongoWatchHooks, report: (document: ReportedDocument) => void,
-  signal?: AbortSignal): ExternalReporter {
+export function createMongoReporter(
+  hooks: MongoWatchHooks,
+  report: (document: ReportedDocument) => void,
+  signal?: AbortSignal,
+): ExternalReporter {
   const release = hooks.pin();
   const comment = randomUUID();
   let resolveReady: () => void = () => {};
   let rejectReady: (error: unknown) => void = () => {};
-  const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
   let request: number | undefined;
   let resolveAggregate: () => void = () => {};
   let stream: ChangeStream<Document, WatchImage> | undefined;
@@ -78,8 +104,13 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
 
   /** Bind readiness to this watch's exact public aggregate request. */
   function started(event: CommandStartedEvent): void {
-    if (event.commandName === 'aggregate' && event.databaseName === hooks.database &&
-      event.command.aggregate === hooks.collection && event.command.comment === comment) request = event.requestId;
+    if (
+      event.commandName === 'aggregate' &&
+      event.databaseName === hooks.database &&
+      event.command.aggregate === hooks.collection &&
+      event.command.comment === comment
+    )
+      request = event.requestId;
   }
 
   /** Preserve firstBatch events while permitting initial kernel reconciliation to begin. */
@@ -93,14 +124,18 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
     hooks.client.off('commandStarted', started);
     hooks.client.off('commandSucceeded', succeeded);
     signal?.removeEventListener('abort', aborted);
-    closing = Promise.resolve().then(async () => { await stream?.close(); }).finally(release);
+    closing = Promise.resolve()
+      .then(async () => {
+        await stream?.close();
+      })
+      .finally(release);
     return closing;
   }
 
   /** Abort startup promptly while the actual cursor close owns subsequent cleanup. */
   function aborted(): void {
     rejectReady(signal?.reason);
-    void close().catch(error => console.error(error));
+    void close().catch((error) => console.error(error));
   }
 
   hooks.client.on('commandStarted', started);
@@ -110,26 +145,45 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
   /** Start observation before returning the reporter, leaving all event delivery ordered by its consumer. */
   async function begin(fresh = false) {
     signal?.throwIfAborted();
-    const budget = { nodes: 1, bytes: Number.MAX_SAFE_INTEGER, exprWork: Number.MAX_SAFE_INTEGER, deadline: Date.now() + 5000 };
+    const budget = {
+      nodes: 1,
+      bytes: Number.MAX_SAFE_INTEGER,
+      exprWork: Number.MAX_SAFE_INTEGER,
+      deadline: Date.now() + 5000,
+    };
     const resumeAfter = fresh ? undefined : await hooks.checkpoint(budget);
     const finish = await hooks.start(resumeAfter !== undefined);
     let established = false;
     try {
-      const aggregate = new Promise<void>(resolve => { resolveAggregate = resolve; });
-      const opened = hooks.client.db(hooks.database).collection(hooks.collection).watch<Document, WatchImage>(
-        watchProjection(hooks.physicalLimit), { fullDocument: 'updateLookup', batchSize: 1, comment,
-          promoteValues: false, ...(resumeAfter === undefined ? {} : { resumeAfter }) });
+      const aggregate = new Promise<void>((resolve) => {
+        resolveAggregate = resolve;
+      });
+      const opened = hooks.client
+        .db(hooks.database)
+        .collection(hooks.collection)
+        .watch<Document, WatchImage>(watchProjection(hooks.physicalLimit), {
+          fullDocument: 'updateLookup',
+          batchSize: 1,
+          comment,
+          promoteValues: false,
+          ...(resumeAfter === undefined ? {} : { resumeAfter }),
+        });
       stream = opened;
       signal?.throwIfAborted();
       const first = observeNext(opened);
-      await Promise.race([aggregate, first.then(result => {
-        if ('error' in result) throw result.error;
-        return aggregate;
-      })]);
+      await Promise.race([
+        aggregate,
+        first.then((result) => {
+          if ('error' in result) throw result.error;
+          return aggregate;
+        }),
+      ]);
       signal?.throwIfAborted();
       established = true;
       return { opened, first };
-    } finally { await finish(established); }
+    } finally {
+      await finish(established);
+    }
   }
 
   /** Reestablish observation before requesting bounded current-state recovery after oplog loss. */
@@ -140,8 +194,9 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
   }
 
   let startupReset = false;
-  const beginning = begin().catch(async error => {
-    if (!(error instanceof MongoServerError) || error.codeName !== 'ChangeStreamHistoryLost') throw error;
+  const beginning = begin().catch(async (error) => {
+    if (!(error instanceof MongoServerError) || error.codeName !== 'ChangeStreamHistoryLost')
+      throw error;
     console.error(error);
     startupReset = true;
     return recoverObservation();
@@ -149,7 +204,7 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
   /** Failed startup always retires its pin even if the consumer never enters iteration. */
   function failed(error: unknown): void {
     rejectReady(error);
-    void close().catch(cleanupError => console.error(cleanupError));
+    void close().catch((cleanupError) => console.error(cleanupError));
   }
   void beginning.then(resolveReady, failed);
 
@@ -167,10 +222,13 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
             const result = await next;
             if ('error' in result) throw result.error;
             event = result.event;
-          }
-          catch (error) {
+          } catch (error) {
             if (signal?.aborted) throw signal.reason;
-            if (!(error instanceof MongoServerError) || error.codeName !== 'ChangeStreamHistoryLost') throw error;
+            if (
+              !(error instanceof MongoServerError) ||
+              error.codeName !== 'ChangeStreamHistoryLost'
+            )
+              throw error;
             console.error(error);
             ({ opened, first } = await recoverObservation());
             next = first;
@@ -178,45 +236,92 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
             continue;
           }
           const resume = token(event._id);
-          const budget = { nodes: 1, bytes: Number.MAX_SAFE_INTEGER, exprWork: Number.MAX_SAFE_INTEGER,
-            deadline: Date.now() + 5000 };
-          const transaction = event.lsid === undefined && event.txnNumber === undefined ? undefined
-            : wireTransaction(event.lsid, event.txnNumber);
-          if (transaction !== undefined && await hooks.owns(transaction, budget)) {
+          const budget = {
+            nodes: 1,
+            bytes: Number.MAX_SAFE_INTEGER,
+            exprWork: Number.MAX_SAFE_INTEGER,
+            deadline: Date.now() + 5000,
+          };
+          const transaction =
+            event.lsid === undefined && event.txnNumber === undefined
+              ? undefined
+              : wireTransaction(event.lsid, event.txnNumber);
+          if (transaction !== undefined && (await hooks.owns(transaction, budget))) {
             await hooks.acknowledge(resume, transaction);
             signal?.throwIfAborted();
             next = observeNext(opened);
             continue;
           }
-          if (event.operationType === 'invalidate' || event.operationType === 'drop' || event.operationType === 'rename') {
+          if (
+            event.operationType === 'invalidate' ||
+            event.operationType === 'drop' ||
+            event.operationType === 'rename'
+          ) {
             ({ opened, first } = await recoverObservation());
             next = first;
             yield { t: 'reset', epoch: hooks.epoch };
             continue;
           }
-          if (event.operationType !== 'insert' && event.operationType !== 'replace' &&
-            event.operationType !== 'update' && event.operationType !== 'delete')
+          if (
+            event.operationType !== 'insert' &&
+            event.operationType !== 'replace' &&
+            event.operationType !== 'update' &&
+            event.operationType !== 'delete'
+          )
             throw new KernelError('INVALID', 'Unexpected Mongo change-stream operation');
           const key = token(event.documentKey);
-          const ledger = { budget, physicalLimit: hooks.physicalLimit, physicalBytes: 0, logicalBytes: 0 };
-          const prior = await hooks.locator(locatorKey(hooks.database, hooks.collection, key), ledger);
+          const ledger = {
+            budget,
+            physicalLimit: hooks.physicalLimit,
+            physicalBytes: 0,
+            logicalBytes: 0,
+          };
+          const prior = await hooks.locator(
+            locatorKey(hooks.database, hooks.collection, key),
+            ledger,
+          );
           let path: string, id: string;
           const current: unknown = event.fullDocument;
           if (current === null) {
-            if (prior === null) throw new KernelError('UNAVAILABLE', 'Mongo deleted document has no accepted locator');
-            path = prior.path; id = prior.id;
+            if (prior === null)
+              throw new KernelError(
+                'UNAVAILABLE',
+                'Mongo deleted document has no accepted locator',
+              );
+            path = prior.path;
+            id = prior.id;
           } else {
-            if (typeof current !== 'object' || !('_path' in current) || typeof current._path !== 'string' ||
-              !('_tid' in current) || typeof current._tid !== 'string' || current._tid.length === 0)
+            if (
+              typeof current !== 'object' ||
+              !('_path' in current) ||
+              typeof current._path !== 'string' ||
+              !('_tid' in current) ||
+              typeof current._tid !== 'string' ||
+              current._tid.length === 0
+            )
               throw new KernelError('INVALID', 'Malformed Mongo external identity');
             assertSafePath(current._path);
-            path = hooks.logicalBase === '/' ? current._path : current._path === '/' ? hooks.logicalBase
-              : `${hooks.logicalBase}${current._path}`;
+            path =
+              hooks.logicalBase === '/'
+                ? current._path
+                : current._path === '/'
+                  ? hooks.logicalBase
+                  : `${hooks.logicalBase}${current._path}`;
             id = current._tid;
-            if (!('_type' in current) || typeof current._type !== 'string' || current._type.length === 0)
+            if (
+              !('_type' in current) ||
+              typeof current._type !== 'string' ||
+              current._type.length === 0
+            )
               throw new KernelError('INVALID', 'Malformed Mongo external type');
-            if (prior !== null && (prior.path !== path || prior.id !== id || prior.type !== current._type))
-              throw new KernelError('INVALID', 'Mongo external edit changes accepted document identity');
+            if (
+              prior !== null &&
+              (prior.path !== path || prior.id !== id || prior.type !== current._type)
+            )
+              throw new KernelError(
+                'INVALID',
+                'Mongo external edit changes accepted document identity',
+              );
           }
           report({ path, id, documentKey: key });
           yield [path];
@@ -227,7 +332,9 @@ export function createMongoReporter(hooks: MongoWatchHooks, report: (document: R
       } catch (error) {
         if (signal?.aborted) throw signal.reason;
         throw error;
-      } finally { await close(); }
+      } finally {
+        await close();
+      }
     },
   };
 }

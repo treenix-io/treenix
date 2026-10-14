@@ -104,8 +104,18 @@ describe('translateClass', () => {
           'rdfs:label': 'X',
           'rdfs:subClassOf': [{ '@id': 'schema:A' }, { '@id': 'schema:B' }],
         },
-        { '@id': 'schema:fromA', '@type': 'rdf:Property', 'schema:domainIncludes': [{ '@id': 'schema:A' }], 'schema:rangeIncludes': [{ '@id': 'schema:Text' }] },
-        { '@id': 'schema:fromB', '@type': 'rdf:Property', 'schema:domainIncludes': [{ '@id': 'schema:B' }], 'schema:rangeIncludes': [{ '@id': 'schema:Text' }] },
+        {
+          '@id': 'schema:fromA',
+          '@type': 'rdf:Property',
+          'schema:domainIncludes': [{ '@id': 'schema:A' }],
+          'schema:rangeIncludes': [{ '@id': 'schema:Text' }],
+        },
+        {
+          '@id': 'schema:fromB',
+          '@type': 'rdf:Property',
+          'schema:domainIncludes': [{ '@id': 'schema:B' }],
+          'schema:rangeIncludes': [{ '@id': 'schema:Text' }],
+        },
       ],
     } as unknown as JsonLdSnapshot;
 
@@ -121,9 +131,10 @@ describe('translateClass', () => {
 
   it('throws when override field has no matching snapshot property and no slotType', () => {
     assert.throws(
-      () => translateClass(SNAPSHOT, 'Person', {
-        fields: { knosw: { cardinality: 'scalar' } }, // typo: 'knosw' instead of 'knows'
-      }),
+      () =>
+        translateClass(SNAPSHOT, 'Person', {
+          fields: { knosw: { cardinality: 'scalar' } }, // typo: 'knosw' instead of 'knows'
+        }),
       /not found in snapshot.*knosw/i,
     );
   });
