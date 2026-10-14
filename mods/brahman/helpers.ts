@@ -7,7 +7,7 @@ import type { MenuRow, MenuType, TString } from './types';
 
 export function formatTString(ts: TString | undefined, lang: string): string {
   if (!ts) return '';
-  return ts[lang] || ts.ru || ts.en || Object.values(ts).find(v => v) || '';
+  return ts[lang] || ts.ru || ts.en || Object.values(ts).find((v) => v) || '';
 }
 
 // ── Template engine (Handlebars-compatible) ──
@@ -37,14 +37,11 @@ export function renderTemplate(template: string, data: Record<string, unknown>):
     },
   );
 
-  result = result.replace(
-    /\{\{#tag\s+(\S+)\}\}([\s\S]*?)\{\{\/tag\}\}/g,
-    (_, tagName, body) => {
-      const tags = (data.userTags ?? data.tags ?? []) as string[];
-      const [truePart, falsePart = ''] = body.split('{{else}}');
-      return tags.includes(tagName) ? truePart : falsePart;
-    },
-  );
+  result = result.replace(/\{\{#tag\s+(\S+)\}\}([\s\S]*?)\{\{\/tag\}\}/g, (_, tagName, body) => {
+    const tags = (data.userTags ?? data.tags ?? []) as string[];
+    const [truePart, falsePart = ''] = body.split('{{else}}');
+    return tags.includes(tagName) ? truePart : falsePart;
+  });
 
   result = result.replace(
     /\{\{#and\s+([\s\S]*?)\}\}([\s\S]*?)\{\{\/and\}\}/g,
@@ -89,7 +86,9 @@ export function renderTemplate(template: string, data: Record<string, unknown>):
     try {
       const fn = new Function('data', 'session', 'user', `return (${expr})`);
       return String(fn(data, data, data.user) ?? '');
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   });
 
   // Simple variable interpolation: {field} and {data.nested} and {{field}}
@@ -112,17 +111,22 @@ export function renderTemplate(template: string, data: Record<string, unknown>):
 export function checkTags(userTags: string[], buttonTags: string[]): boolean {
   if (!buttonTags.length) return true;
 
-  const includes = buttonTags.filter(t => !t.startsWith('!'));
-  const excludes = buttonTags.filter(t => t.startsWith('!')).map(t => t.slice(1));
+  const includes = buttonTags.filter((t) => !t.startsWith('!'));
+  const excludes = buttonTags.filter((t) => t.startsWith('!')).map((t) => t.slice(1));
 
-  if (excludes.some(t => userTags.includes(t))) return false;
+  if (excludes.some((t) => userTags.includes(t))) return false;
   if (includes.length === 0) return true;
-  return includes.some(t => userTags.includes(t));
+  return includes.some((t) => userTags.includes(t));
 }
 
 // ── Keyboard building ──
 
-export function buildReplyMarkup(rows: MenuRow[], type: MenuType, lang: string, userTags: string[] = []) {
+export function buildReplyMarkup(
+  rows: MenuRow[],
+  type: MenuType,
+  lang: string,
+  userTags: string[] = [],
+) {
   if (type === 'none') return undefined;
   if (type === 'remove') return { reply_markup: { remove_keyboard: true as const } };
   if (type === 'force_reply') return { reply_markup: { force_reply: true as const } };
@@ -151,9 +155,10 @@ export function buildReplyMarkup(rows: MenuRow[], type: MenuType, lang: string, 
       if (btn.url) {
         kb.url(text, btn.url);
       } else {
-        const cbData = btn.action?.type === 'brahman.action.page'
-          ? `page:${btn.action.target ?? ''}`
-          : `btn:${btn.id}`;
+        const cbData =
+          btn.action?.type === 'brahman.action.page'
+            ? `page:${btn.action.target ?? ''}`
+            : `btn:${btn.id}`;
         kb.text(text, cbData);
       }
     }
@@ -165,9 +170,15 @@ export function buildReplyMarkup(rows: MenuRow[], type: MenuType, lang: string, 
 // ── Language flags ──
 
 export const LANG_FLAGS: Record<string, string> = {
-  ru: '\u{1F1F7}\u{1F1FA}', en: '\u{1F1EC}\u{1F1E7}', de: '\u{1F1E9}\u{1F1EA}',
-  uz: '\u{1F1FA}\u{1F1FF}', fr: '\u{1F1EB}\u{1F1F7}', es: '\u{1F1EA}\u{1F1F8}',
-  it: '\u{1F1EE}\u{1F1F9}', pt: '\u{1F1F5}\u{1F1F9}', tr: '\u{1F1F9}\u{1F1F7}',
+  ru: '\u{1F1F7}\u{1F1FA}',
+  en: '\u{1F1EC}\u{1F1E7}',
+  de: '\u{1F1E9}\u{1F1EA}',
+  uz: '\u{1F1FA}\u{1F1FF}',
+  fr: '\u{1F1EB}\u{1F1F7}',
+  es: '\u{1F1EA}\u{1F1F8}',
+  it: '\u{1F1EE}\u{1F1F9}',
+  pt: '\u{1F1F5}\u{1F1F9}',
+  tr: '\u{1F1F9}\u{1F1F7}',
 };
 
 // ── Language keyboard builder ──

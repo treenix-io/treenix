@@ -2,8 +2,6 @@ import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Launcher — iPhone-like home screen for Treenix
 
-
-
 /** Home screen with icon grid + widgets. Layout via react-grid-layout. */
 export class Launcher {
   columns = 4;
@@ -22,12 +20,15 @@ const declaredLauncher = declareClientType('launcher', Launcher);
 
 export interface Launcher {
   /** Add an app shortcut (ref) to the launcher */
-  addApp(data: { /** Target node path */ path: string; /** Layout item id */ id?: string }): Promise<void>;
+  addApp(data: {
+    /** Target node path */ path: string;
+    /** Layout item id */ id?: string;
+  }): Promise<void>;
 
   /** Remove an app from the launcher */
   removeApp(data: { /** Child id (last path segment) */ id: string }): Promise<void>;
 }
 
-export const clientModules = [declareOpenModule('@treenx/mods/launcher/types', [], [
-  declaredLauncher,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/launcher/types', [], [declaredLauncher]),
+];

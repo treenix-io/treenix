@@ -1,156 +1,168 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData,getComponents } from '@treenx/core';
+import { type ComponentData, getComponents } from '@treenx/core';
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
-import { Render,RenderContext,type View } from '@treenx/react';
+import { Render, RenderContext, type View } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import {
-DropdownMenuItem,DropdownMenuSeparator,DropdownMenuSub,
-DropdownMenuSubContent,DropdownMenuSubTrigger,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@treenx/react/ui/dropdown-menu';
-import { useEffect,useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RowColGrid } from './lib/row-col-grid';
-import { isComponentRef,type LayoutItem,type LayoutRow } from './lib/types';
+import { isComponentRef, type LayoutItem, type LayoutRow } from './lib/types';
 import type { RowColLayout } from './types';
 
-let _counter = 0
-const rid = () => `r${Date.now().toString(36)}${(_counter++).toString(36)}`
+let _counter = 0;
+const rid = () => `r${Date.now().toString(36)}${(_counter++).toString(36)}`;
 
 function toLayoutRef(name: string): string {
-  return name === '' ? '#' : `#${name}`
+  return name === '' ? '#' : `#${name}`;
 }
 
 function childToRef(childPath: string, parentPath: string): string {
-  const prefix = parentPath === '/' ? '/' : parentPath + '/'
-  return childPath.startsWith(prefix) ? childPath.slice(prefix.length) : childPath
+  const prefix = parentPath === '/' ? '/' : parentPath + '/';
+  return childPath.startsWith(prefix) ? childPath.slice(prefix.length) : childPath;
 }
 
 function reconcile(discoveredRefs: Set<string>, rows: LayoutRow[], hidden: string[]) {
-  const seen = new Set<string>()
+  const seen = new Set<string>();
   const reconciledRows = rows
-    .map(r => ({
+    .map((r) => ({
       ...r,
-      items: r.items.filter(i => {
-        if (!discoveredRefs.has(i.ref) || seen.has(i.ref)) return false
-        seen.add(i.ref)
-        return true
+      items: r.items.filter((i) => {
+        if (!discoveredRefs.has(i.ref) || seen.has(i.ref)) return false;
+        seen.add(i.ref);
+        return true;
       }),
     }))
-    .filter(r => r.items.length > 0)
+    .filter((r) => r.items.length > 0);
 
-  const dedupedHidden = [...new Set(hidden)].filter(h => discoveredRefs.has(h) && !seen.has(h))
-  return { rows: reconciledRows, hidden: dedupedHidden }
+  const dedupedHidden = [...new Set(hidden)].filter((h) => discoveredRefs.has(h) && !seen.has(h));
+  return { rows: reconciledRows, hidden: dedupedHidden };
 }
 
 const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
-  const registry = useClientRegistry()
-  const [editable, setEditable] = useState(false)
+  const registry = useClientRegistry();
+  const [editable, setEditable] = useState(false);
 
-  const node = ctx?.node
-  if (!node) return null
+  const node = ctx?.node;
+  if (!node) return null;
 
-  const allComps = getComponents(node)
+  const allComps = getComponents(node);
 
-  const compMap = new Map<string, ComponentData>()
+  const compMap = new Map<string, ComponentData>();
   for (const [name, comp] of allComps) {
-    if (name === 'layout') continue
-    compMap.set(toLayoutRef(name), comp)
+    if (name === 'layout') continue;
+    compMap.set(toLayoutRef(name), comp);
   }
 
-  const { data: children, loading: childrenLoading, error: childrenError } = useChildren(node.$path)
-  const childMap = new Map<string, PresentationNode>()
+  const {
+    data: children,
+    loading: childrenLoading,
+    error: childrenError,
+  } = useChildren(node.$path);
+  const childMap = new Map<string, PresentationNode>();
   for (const child of children) {
-    const ref = childToRef(child.$path, node.$path)
-    childMap.set(ref, child)
+    const ref = childToRef(child.$path, node.$path);
+    childMap.set(ref, child);
   }
 
   const discoveredRefs = new Set([
     ...compMap.keys(),
-    ...value.rows.flatMap(r => r.items.map(i => i.ref)).filter(ref => !isComponentRef(ref) && childMap.has(ref)),
-  ])
+    ...value.rows
+      .flatMap((r) => r.items.map((i) => i.ref))
+      .filter((ref) => !isComponentRef(ref) && childMap.has(ref)),
+  ]);
 
   const { rows: cleanRows, hidden: cleanHidden } = reconcile(
-    discoveredRefs, value.rows, value.hidden,
-  )
+    discoveredRefs,
+    value.rows,
+    value.hidden,
+  );
 
-  const storedRowsJson = JSON.stringify(value.rows)
-  const cleanRowsJson = JSON.stringify(cleanRows)
-  const storedHiddenJson = JSON.stringify(value.hidden)
-  const cleanHiddenJson = JSON.stringify(cleanHidden)
+  const storedRowsJson = JSON.stringify(value.rows);
+  const cleanRowsJson = JSON.stringify(cleanRows);
+  const storedHiddenJson = JSON.stringify(value.hidden);
+  const cleanHiddenJson = JSON.stringify(cleanHidden);
 
   // Children load is async. While loading or after error, child refs may be
   // missing from childMap and silently reconciled OUT — which would persist
   // rows: [] and lose seeded layout. Hold off the write until children settle.
-  const reconcileBlocked = childrenLoading || !!childrenError
+  const reconcileBlocked = childrenLoading || !!childrenError;
 
   useEffect(() => {
-    if (reconcileBlocked) return
+    if (reconcileBlocked) return;
     if (storedRowsJson !== cleanRowsJson || storedHiddenJson !== cleanHiddenJson) {
-      onChange?.({ rows: cleanRows, hidden: cleanHidden })
+      onChange?.({ rows: cleanRows, hidden: cleanHidden });
     }
-  }, [reconcileBlocked, storedRowsJson, cleanRowsJson, storedHiddenJson, cleanHiddenJson])
+  }, [reconcileBlocked, storedRowsJson, cleanRowsJson, storedHiddenJson, cleanHiddenJson]);
 
-  const mentionedRefs = new Set(cleanRows.flatMap(r => r.items.map(i => i.ref)))
-  const hiddenSet = new Set(cleanHidden)
+  const mentionedRefs = new Set(cleanRows.flatMap((r) => r.items.map((i) => i.ref)));
+  const hiddenSet = new Set(cleanHidden);
   const autoRows: LayoutRow[] = [...compMap.keys()]
-    .filter(ref => !mentionedRefs.has(ref) && !hiddenSet.has(ref))
-    .map(ref => ({ id: rid(), items: [{ ref }] }))
+    .filter((ref) => !mentionedRefs.has(ref) && !hiddenSet.has(ref))
+    .map((ref) => ({ id: rid(), items: [{ ref }] }));
 
-  const effectiveRows = [...cleanRows, ...autoRows]
+  const effectiveRows = [...cleanRows, ...autoRows];
 
   function renderItem(ref: string) {
     if (isComponentRef(ref)) {
-      const compData = compMap.get(ref)
-      if (!compData) return <div className="text-[--text-3] text-sm italic">Unknown: {ref}</div>
+      const compData = compMap.get(ref);
+      if (!compData) return <div className="text-[--text-3] text-sm italic">Unknown: {ref}</div>;
 
-      const itemConfig = effectiveRows.flatMap(r => r.items).find(i => i.ref === ref)
-      const renderCtx = itemConfig?.context ?? value.context ?? 'react'
+      const itemConfig = effectiveRows.flatMap((r) => r.items).find((i) => i.ref === ref);
+      const renderCtx = itemConfig?.context ?? value.context ?? 'react';
 
       return (
         <RenderContext name={renderCtx}>
           <Render value={compData} />
         </RenderContext>
-      )
+      );
     }
 
-    const child = childMap.get(ref)
+    const child = childMap.get(ref);
     if (!child) {
-      if (childrenLoading) return <div className="text-[--text-3] text-sm italic opacity-50">Loading {ref}…</div>
-      return <div className="text-[--text-3] text-sm italic">Missing child: {ref}</div>
+      if (childrenLoading)
+        return <div className="text-[--text-3] text-sm italic opacity-50">Loading {ref}…</div>;
+      return <div className="text-[--text-3] text-sm italic">Missing child: {ref}</div>;
     }
 
-    const itemConfig = effectiveRows.flatMap(r => r.items).find(i => i.ref === ref)
-    const renderCtx = itemConfig?.context ?? value.context ?? 'react'
+    const itemConfig = effectiveRows.flatMap((r) => r.items).find((i) => i.ref === ref);
+    const renderCtx = itemConfig?.context ?? value.context ?? 'react';
 
     return (
       <RenderContext name={renderCtx}>
         <Render value={child} />
       </RenderContext>
-    )
+    );
   }
 
   function resolveRefType(ref: string): string | undefined {
     if (isComponentRef(ref)) {
-      const comp = compMap.get(ref)
-      return comp?.$type
+      const comp = compMap.get(ref);
+      return comp?.$type;
     }
-    const child = childMap.get(ref)
-    return child?.$type
+    const child = childMap.get(ref);
+    return child?.$type;
   }
 
   function setItemContext(ref: string, ctx: string | undefined) {
-    const newRows = effectiveRows.map(r => ({
+    const newRows = effectiveRows.map((r) => ({
       ...r,
-      items: r.items.map(i => i.ref === ref ? { ...i, context: ctx } : i),
-    }))
-    onChange?.({ rows: newRows })
+      items: r.items.map((i) => (i.ref === ref ? { ...i, context: ctx } : i)),
+    }));
+    onChange?.({ rows: newRows });
   }
 
   function renderItemMenuExtras(item: LayoutItem) {
-    const type = resolveRefType(item.ref)
-    if (!type) return null
-    const contexts = registry.allContexts(type)
-    if (!contexts.length) return null
+    const type = resolveRefType(item.ref);
+    if (!type) return null;
+    const contexts = registry.allContexts(type);
+    if (!contexts.length) return null;
 
     return (
       <>
@@ -164,7 +176,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
               None (inherit)
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            {contexts.map(c => (
+            {contexts.map((c) => (
               <DropdownMenuItem
                 key={c}
                 className={`text-xs font-mono ${item.context === c ? 'font-bold' : ''}`}
@@ -177,20 +189,20 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
         </DropdownMenuSub>
         <DropdownMenuSeparator />
       </>
-    )
+    );
   }
 
   function renderGlobalMenuExtras() {
     // Union of contexts discovered across all items currently in the layout
-    const discovered = new Set<string>()
+    const discovered = new Set<string>();
     for (const row of effectiveRows) {
       for (const item of row.items) {
-        const type = resolveRefType(item.ref)
-        if (!type) continue
-        for (const c of registry.allContexts(type)) discovered.add(c)
+        const type = resolveRefType(item.ref);
+        if (!type) continue;
+        for (const c of registry.allContexts(type)) discovered.add(c);
       }
     }
-    const contexts = [...discovered].sort()
+    const contexts = [...discovered].sort();
 
     return (
       <DropdownMenuSub>
@@ -203,7 +215,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
             None
           </DropdownMenuItem>
           {contexts.length > 0 && <DropdownMenuSeparator />}
-          {contexts.map(c => (
+          {contexts.map((c) => (
             <DropdownMenuItem
               key={c}
               className={`text-xs font-mono ${value.context === c ? 'font-bold' : ''}`}
@@ -220,17 +232,17 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
               placeholder="Custom context…"
               className="w-full text-xs font-mono px-1 py-0.5 rounded border border-[--border] bg-[--bg-1]"
               onKeyDown={(e) => {
-                e.stopPropagation()
+                e.stopPropagation();
                 if (e.key === 'Enter') {
-                  const v = (e.target as HTMLInputElement).value.trim()
-                  onChange?.({ context: v || undefined })
+                  const v = (e.target as HTMLInputElement).value.trim();
+                  onChange?.({ context: v || undefined });
                 }
               }}
             />
           </div>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-    )
+    );
   }
 
   return (
@@ -259,11 +271,11 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
         onChange={(patch) => onChange?.(patch)}
       />
     </div>
-  )
-}
+  );
+};
 
 export const clientModules = [
   declareClientModule('@treenx/mods/row-layout/view', [
-    declareView('layout.row-col', 'react:layout', RowColLayoutView)
-  ])
+    declareView('layout.row-col', 'react:layout', RowColLayoutView),
+  ]),
 ];

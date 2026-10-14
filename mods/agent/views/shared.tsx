@@ -4,11 +4,11 @@ import dayjs from 'dayjs';
 // ── Design tokens ──
 
 export const STATUS: Record<string, { bg: string; text: string; dot: string }> = {
-  pending:  { bg: 'bg-amber-500/15', text: 'text-amber-400', dot: 'bg-amber-400' },
-  running:  { bg: 'bg-sky-500/15', text: 'text-sky-400', dot: 'bg-sky-400 animate-pulse' },
-  done:     { bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  error:    { bg: 'bg-red-500/15', text: 'text-red-400', dot: 'bg-red-400' },
-  aborted:  { bg: 'bg-muted-foreground/15', text: 'text-muted-foreground', dot: 'bg-muted' },
+  pending: { bg: 'bg-amber-500/15', text: 'text-amber-400', dot: 'bg-amber-400' },
+  running: { bg: 'bg-sky-500/15', text: 'text-sky-400', dot: 'bg-sky-400 animate-pulse' },
+  done: { bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  error: { bg: 'bg-red-500/15', text: 'text-red-400', dot: 'bg-red-400' },
+  aborted: { bg: 'bg-muted-foreground/15', text: 'text-muted-foreground', dot: 'bg-muted' },
 };
 
 export function formatTime(ts: number): string {
@@ -34,7 +34,13 @@ export function StatusDot({ status }: { status: string }) {
 export function StatusBadge({ status }: { status: string }) {
   const s = STATUS[status] || STATUS.pending;
   return (
-    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase', s.bg, s.text)}>
+    <span
+      className={cn(
+        'px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase',
+        s.bg,
+        s.text,
+      )}
+    >
       {status}
     </span>
   );

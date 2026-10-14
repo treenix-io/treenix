@@ -1,20 +1,28 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
 import { getComponent } from '@treenx/core';
 import {
-cn,
-useActions,
-minimd,
-Render,
-RenderContext,
-useChildren,
-usePath,
-type View,
+  cn,
+  useActions,
+  minimd,
+  Render,
+  RenderContext,
+  useChildren,
+  usePath,
+  type View,
 } from '@treenx/react';
-import { RenderChildren,RenderItem } from '@treenx/react/mods/editor-ui/list-items';
-import { useMemo,useState } from 'react';
-import { type AgentStatus,AiAgent,AiApproval,AiApprovals,AiPlan,AiPool,AiThread } from './types';
+import { RenderChildren, RenderItem } from '@treenx/react/mods/editor-ui/list-items';
+import { useMemo, useState } from 'react';
+import {
+  type AgentStatus,
+  AiAgent,
+  AiApproval,
+  AiApprovals,
+  AiPlan,
+  AiPool,
+  AiThread,
+} from './types';
 
 // Side-effect imports — register views for sub-components
 import { clientModules as declaredClient0 } from './views/run';
@@ -25,17 +33,22 @@ import { clientModules as declaredClient1 } from './views/chat';
 type StatusStyle = { bg: string; text: string; dot: string; label: string };
 
 const AGENT_STATUS: Record<AgentStatus, StatusStyle> = {
-  idle:    { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'idle' },
-  working: { bg: 'bg-sky-500/10', text: 'text-sky-400', dot: 'bg-sky-400 animate-pulse', label: 'working' },
+  idle: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'idle' },
+  working: {
+    bg: 'bg-sky-500/10',
+    text: 'text-sky-400',
+    dot: 'bg-sky-400 animate-pulse',
+    label: 'working',
+  },
   blocked: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400', label: 'blocked' },
-  error:   { bg: 'bg-red-500/10', text: 'text-red-400', dot: 'bg-red-400', label: 'error' },
+  error: { bg: 'bg-red-500/10', text: 'text-red-400', dot: 'bg-red-400', label: 'error' },
   offline: { bg: 'bg-muted/20', text: 'text-muted-foreground', dot: 'bg-muted', label: 'offline' },
 };
 
 const APPROVAL_STATUS: Record<string, { bg: string; text: string; border: string }> = {
-  pending:  { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
+  pending: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
   approved: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
-  denied:   { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30' },
+  denied: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30' },
 };
 
 function timeAgo(ts: number): string {
@@ -70,15 +83,15 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
   const { data: agents } = useChildren(path);
   const { data: approvals } = useChildren('/guardian/approvals');
 
-  const agentNodes = (agents ?? []).filter(n => n.$type === 'ai.agent');
-  const approvalNodes = (approvals ?? []).filter(n => n.$type === 'ai.approval');
-  const pendingApprovals = approvalNodes.filter(n => n.status === 'pending');
+  const agentNodes = (agents ?? []).filter((n) => n.$type === 'ai.agent');
+  const approvalNodes = (approvals ?? []).filter((n) => n.$type === 'ai.approval');
+  const pendingApprovals = approvalNodes.filter((n) => n.status === 'pending');
 
   const activeCount = value.active?.length ?? 0;
   const queueCount = value.queue?.length ?? 0;
   const maxC = value.maxConcurrent ?? 2;
 
-  const activeRuns = agentNodes.filter(a => a.currentRun);
+  const activeRuns = agentNodes.filter((a) => a.currentRun);
 
   return (
     <div className="flex flex-col gap-6 p-5 max-w-3xl">
@@ -135,7 +148,7 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
           <h3 className="text-[11px] font-medium text-sky-400 uppercase tracking-wider">
             Current Runs ({activeRuns.length})
           </h3>
-          {activeRuns.map(a => (
+          {activeRuns.map((a) => (
             <ActiveRun key={a.$path} runPath={a.currentRun as string} />
           ))}
         </div>
@@ -195,7 +208,7 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
   const sortedRuns = useMemo(() => {
     if (!runs?.length) return [];
     return [...runs]
-      .filter(n => n.$type === 'ai.run')
+      .filter((n) => n.$type === 'ai.run')
       .sort((a, b) => b.$path.localeCompare(a.$path))
       .slice(0, 20);
   }, [runs]);
@@ -205,22 +218,28 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
       <div className="flex items-center gap-3">
         <StatusDot status={status} />
         <h2 className="text-lg font-semibold text-foreground">{path.split('/').at(-1)}</h2>
-        <span className={cn('text-xs font-mono px-2 py-0.5 rounded', s.bg, s.text)}>
-          {s.label}
-        </span>
+        <span className={cn('text-xs font-mono px-2 py-0.5 rounded', s.bg, s.text)}>{s.label}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <InfoCell label="Role" value={value.role} />
         <InfoCell label="Model" value={value.model || '—'} mono />
         <InfoCell label="Last Run" value={value.lastRunAt ? timeAgo(value.lastRunAt) : 'never'} />
-        <InfoCell label="Tokens" value={value.totalTokens > 0 ? `$${(value.totalTokens / 100000).toFixed(3)}` : '—'} mono />
-        {value.currentTask && <InfoCell label="Current Task" value={value.currentTask} mono span2 />}
+        <InfoCell
+          label="Tokens"
+          value={value.totalTokens > 0 ? `$${(value.totalTokens / 100000).toFixed(3)}` : '—'}
+          mono
+        />
+        {value.currentTask && (
+          <InfoCell label="Current Task" value={value.currentTask} mono span2 />
+        )}
       </div>
 
       {value.systemPrompt && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">System Prompt</span>
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            System Prompt
+          </span>
           <pre className="text-xs text-muted-foreground bg-card/50 border border-border rounded-lg p-3 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
             {value.systemPrompt}
           </pre>
@@ -230,7 +249,9 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
       {/* Current run (live) */}
       {runNode && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-sky-400 uppercase tracking-wider">Current Run</span>
+          <span className="text-[11px] font-medium text-sky-400 uppercase tracking-wider">
+            Current Run
+          </span>
           <Render value={runNode} />
         </div>
       )}
@@ -260,16 +281,45 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
   );
 };
 
-function InfoCell({ label, value, mono, span2 }: { label: string; value: string; mono?: boolean; span2?: boolean }) {
+function InfoCell({
+  label,
+  value,
+  mono,
+  span2,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  span2?: boolean;
+}) {
   return (
-    <div className={cn('bg-card/40 border border-border/50 rounded-lg px-3 py-2', span2 && 'col-span-2')}>
-      <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">{label}</span>
-      <span className={cn('text-sm text-foreground mt-0.5 block truncate', mono && 'font-mono text-xs')}>{value}</span>
+    <div
+      className={cn(
+        'bg-card/40 border border-border/50 rounded-lg px-3 py-2',
+        span2 && 'col-span-2',
+      )}
+    >
+      <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+        {label}
+      </span>
+      <span
+        className={cn('text-sm text-foreground mt-0.5 block truncate', mono && 'font-mono text-xs')}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-function ActionBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
+function ActionBtn({
+  label,
+  color,
+  onClick,
+}: {
+  label: string;
+  color: string;
+  onClick: () => void;
+}) {
   const colors: Record<string, string> = {
     emerald: 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border-emerald-500/20',
     zinc: 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border-border/20',
@@ -278,7 +328,10 @@ function ActionBtn({ label, color, onClick }: { label: string; color: string; on
   return (
     <button
       onClick={onClick}
-      className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors', colors[color] ?? colors.zinc)}
+      className={cn(
+        'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+        colors[color] ?? colors.zinc,
+      )}
     >
       {label}
     </button>
@@ -289,8 +342,8 @@ function ActionBtn({ label, color, onClick }: { label: string; color: string; on
 
 const ApprovalsView: View<AiApprovals> = ({ ctx }) => {
   const { data: children } = useChildren(ctx!.node.$path, { watch: true, watchNew: true });
-  const pending = children.filter(n => n.$type === 'ai.approval' && n.status === 'pending');
-  const resolved = children.filter(n => n.$type === 'ai.approval' && n.status !== 'pending');
+  const pending = children.filter((n) => n.$type === 'ai.approval' && n.status === 'pending');
+  const resolved = children.filter((n) => n.$type === 'ai.approval' && n.status !== 'pending');
 
   return (
     <div className="flex flex-col gap-5 p-5 max-w-3xl">
@@ -301,7 +354,9 @@ const ApprovalsView: View<AiApprovals> = ({ ctx }) => {
           <h3 className="text-[11px] font-medium text-amber-400 uppercase tracking-wider">
             Pending ({pending.length})
           </h3>
-          {pending.map(a => <Render key={a.$path} value={a} />)}
+          {pending.map((a) => (
+            <Render key={a.$path} value={a} />
+          ))}
         </div>
       )}
 
@@ -314,19 +369,20 @@ const ApprovalsView: View<AiApprovals> = ({ ctx }) => {
           <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
             History ({resolved.length})
           </h3>
-          {resolved.slice(0, 20).map(a => <Render key={a.$path} value={a} />)}
+          {resolved.slice(0, 20).map((a) => (
+            <Render key={a.$path} value={a} />
+          ))}
         </div>
       )}
     </div>
   );
-}
+};
 
 // ── ApprovalView (ai.approval) ──
 
 const ApprovalView: View<AiApproval> = ({ value }) => {
   const actions = useActions(value);
 
-  
   const status = value.status || 'pending';
   const s = APPROVAL_STATUS[status] ?? APPROVAL_STATUS.pending;
   const isPending = status === 'pending';
@@ -357,18 +413,31 @@ const ApprovalView: View<AiApproval> = ({ value }) => {
           <a className="text-[11px] text-blue-400 hover:underline" href={`/t${value.branchRef}`}>
             Review diff & merge
           </a>
-          <a className="text-[11px] text-muted-foreground hover:underline" href={`/t${value.branchRef}/tree`}>
+          <a
+            className="text-[11px] text-muted-foreground hover:underline"
+            href={`/t${value.branchRef}/tree`}
+          >
             Browse the tree as the agent sees it
           </a>
         </div>
-      ) : isPending && (
-        <div className="flex items-center gap-2 pt-1 flex-wrap">
-          <ActionBtn label="Approve" color="emerald" onClick={() => actions.approve()} />
-          <ActionBtn label="Deny" color="red" onClick={() => actions.deny()} />
-          <span className="text-[10px] text-muted-foreground/60 mx-1">|</span>
-          <ActionBtn label="Approve + remember (agent)" color="emerald" onClick={() => actions.approve({ remember: 'agent' })} />
-          <ActionBtn label="Approve + remember (global)" color="emerald" onClick={() => actions.approve({ remember: 'global' })} />
-        </div>
+      ) : (
+        isPending && (
+          <div className="flex items-center gap-2 pt-1 flex-wrap">
+            <ActionBtn label="Approve" color="emerald" onClick={() => actions.approve()} />
+            <ActionBtn label="Deny" color="red" onClick={() => actions.deny()} />
+            <span className="text-[10px] text-muted-foreground/60 mx-1">|</span>
+            <ActionBtn
+              label="Approve + remember (agent)"
+              color="emerald"
+              onClick={() => actions.approve({ remember: 'agent' })}
+            />
+            <ActionBtn
+              label="Approve + remember (global)"
+              color="emerald"
+              onClick={() => actions.approve({ remember: 'global' })}
+            />
+          </div>
+        )
       )}
     </div>
   );
@@ -391,7 +460,9 @@ const ThreadView: View<AiThread> = ({ value }) => {
             {msg.role}
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+              {msg.text}
+            </p>
             <span className="text-[10px] text-muted-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity">
               {msg.from} · {timeAgo(msg.ts)}
             </span>
@@ -407,7 +478,7 @@ const ThreadView: View<AiThread> = ({ value }) => {
 const PlanView: View<AiPlan> = ({ value, ctx }) => {
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState(false);
-  const html = useMemo(() => value.text ? minimd(value.text) : '', [value.text]);
+  const html = useMemo(() => (value.text ? minimd(value.text) : ''), [value.text]);
 
   if (!value.text && !value.feedback) return null;
 
@@ -425,8 +496,13 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
   if (value.approved) {
     return (
       <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
-        <div className="mb-1 text-[11px] font-medium text-emerald-400 uppercase tracking-wider">Plan approved</div>
-        <div className="minimd max-h-40 overflow-y-auto text-sm text-foreground" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="mb-1 text-[11px] font-medium text-emerald-400 uppercase tracking-wider">
+          Plan approved
+        </div>
+        <div
+          className="minimd max-h-40 overflow-y-auto text-sm text-foreground"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
         {value.feedback && (
           <div className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-muted-foreground">
             Feedback: {value.feedback}
@@ -439,7 +515,9 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
   return (
     <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-amber-400 uppercase tracking-wider">Plan awaiting approval</span>
+        <span className="text-[11px] font-medium text-amber-400 uppercase tracking-wider">
+          Plan awaiting approval
+        </span>
         <span className="text-[10px] text-muted-foreground">
           {value.createdAt ? new Date(value.createdAt).toLocaleString() : ''}
         </span>
@@ -458,7 +536,7 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
 
       <textarea
         value={feedback}
-        onChange={e => setFeedback(e.target.value)}
+        onChange={(e) => setFeedback(e.target.value)}
         placeholder="Feedback / comments (optional)..."
         className="mb-2 w-full min-h-16 max-h-32 resize-none rounded border border-border bg-card/50 p-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-border"
       />
@@ -484,9 +562,7 @@ const ApprovalRow: View<AiApproval> = ({ value }) => {
         {status}
       </span>
 
-      <span className="text-sm text-foreground truncate">
-        {value.agentRole || 'agent'}
-      </span>
+      <span className="text-sm text-foreground truncate">{value.agentRole || 'agent'}</span>
 
       <span className="text-[11px] text-muted-foreground font-mono truncate">
         → {value.tool || '?'}
@@ -495,7 +571,9 @@ const ApprovalRow: View<AiApproval> = ({ value }) => {
       <div className="flex-1" />
 
       {value.createdAt > 0 && (
-        <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(value.createdAt)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {timeAgo(value.createdAt)}
+        </span>
       )}
     </>
   );
@@ -523,8 +601,15 @@ const AgentLayout: View<AiAgent> = ({ ctx }) => {
           onClick={() => setCollapsed(!collapsed)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors w-full"
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-            className={cn('shrink-0 transition-transform duration-150', !collapsed && 'rotate-90')}>
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            className={cn('shrink-0 transition-transform duration-150', !collapsed && 'rotate-90')}
+          >
             <path d="M9 18l6-6-6-6" />
           </svg>
           Agent
@@ -560,8 +645,8 @@ export const clientModules = [
     declareView(AiApproval, 'react:list', ApprovalRow),
     declareView(AiApprovals, 'react', ApprovalsView),
     declareView(AiThread, 'react', ThreadView),
-    declareView(AiPlan, 'react', PlanView)
+    declareView(AiPlan, 'react', PlanView),
   ]),
   ...declaredClient0,
-  ...declaredClient1
+  ...declaredClient1,
 ];

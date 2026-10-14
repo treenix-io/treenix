@@ -3,13 +3,12 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { getComponent, type NodeData } from '@treenx/core';
 import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 
-
 /** Speech-to-text config — Whisper model, language, audio path */
 export class WhisperConfig {
   model = 'small';
   language = 'ru';
   audioDir = './data/audio';
-  url = '';  // override route path; empty = use node's $path
+  url = ''; // override route path; empty = use node's $path
   /** Channel id → target dir for transcription nodes. Route rejects ids not listed here (fail closed) */
   channels: Record<string, string> = {};
   /** Delete raw audio files older than this many days (0 = keep forever); transcript text stays */
@@ -59,7 +58,10 @@ const declaredWhisperText = declareClientType('whisper.text', WhisperText);
 const declaredWhisperMeta = declareClientType('whisper.meta', WhisperMeta);
 const declaredWhisperChecklist = declareClientType('whisper.checklist', WhisperChecklist);
 const declaredWhisperChannel = declareClientType('whisper.channel', WhisperChannel);
-const declaredWhisperTranscription = declareClientType('whisper.transcription', WhisperTranscription);
+const declaredWhisperTranscription = declareClientType(
+  'whisper.transcription',
+  WhisperTranscription,
+);
 
 // 'text' context: readable content for consumers ('' = transcription pending).
 // Registry erases types (system boundary) — data is the node.
@@ -70,12 +72,19 @@ const declaredText = declareText('whisper.transcription', (data) => {
   return text.content === '...' ? '' : text.content;
 });
 
-export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/whisper/types', [declaredText], [
-  declaredWhisperConfig,
-  declaredWhisperAudio,
-  declaredWhisperText,
-  declaredWhisperMeta,
-  declaredWhisperChecklist,
-  declaredWhisperChannel,
-  declaredWhisperTranscription,
-])];
+export const clientModules = [
+  ...primitiveTextModules,
+  declareOpenModule(
+    '@treenx/mods/whisper/types',
+    [declaredText],
+    [
+      declaredWhisperConfig,
+      declaredWhisperAudio,
+      declaredWhisperText,
+      declaredWhisperMeta,
+      declaredWhisperChecklist,
+      declaredWhisperChannel,
+      declaredWhisperTranscription,
+    ],
+  ),
+];

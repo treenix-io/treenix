@@ -11,10 +11,7 @@ function acl(entries: readonly { g: string; p: number }[]): readonly AclEntry[] 
       ? { subject: { group: entry.g }, deny: R | W | A }
       : {
           subject: { group: entry.g },
-          grant:
-            (entry.p & R ? R : 0) |
-            (entry.p & W ? W : 0) |
-            (entry.p & A ? A : 0),
+          grant: (entry.p & R ? R : 0) | (entry.p & W ? W : 0) | (entry.p & A ? A : 0),
         },
   );
 }

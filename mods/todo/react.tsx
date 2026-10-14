@@ -1,9 +1,9 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
-import { Render,useActions,useChildren,type View } from '@treenx/react';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { Render, useActions, useChildren, type View } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
 import { useState } from 'react';
-import { TodoItem,TodoList } from './types';
+import { TodoItem, TodoList } from './types';
 
 const TodoListView: View<TodoList> = ({ value, ctx }) => {
   const actions = useActions(value);
@@ -25,14 +25,16 @@ const TodoListView: View<TodoList> = ({ value, ctx }) => {
           className="flex-1"
           placeholder="What needs to be done?"
           value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
         />
-        <Button size="sm" onClick={handleAdd}>Add</Button>
+        <Button size="sm" onClick={handleAdd}>
+          Add
+        </Button>
       </div>
 
       <ul className="space-y-1">
-        {children.map(child => (
+        {children.map((child) => (
           <Render key={child.$path} value={child} />
         ))}
       </ul>
@@ -49,15 +51,15 @@ const TodoItemRow: View<TodoItem> = ({ value }) => {
         hover:bg-muted cursor-pointer"
       onClick={() => actions.toggle()}
     >
-      <span className={`w-4 h-4 rounded border flex items-center
-        justify-center text-xs ${value.done
-          ? 'bg-primary border-primary text-primary-foreground'
-          : 'border-input'}`}>
+      <span
+        className={`w-4 h-4 rounded border flex items-center
+        justify-center text-xs ${
+          value.done ? 'bg-primary border-primary text-primary-foreground' : 'border-input'
+        }`}
+      >
         {value.done ? '✓' : ''}
       </span>
-      <span className={value.done ? 'line-through text-muted-foreground' : ''}>
-        {value.title}
-      </span>
+      <span className={value.done ? 'line-through text-muted-foreground' : ''}>{value.title}</span>
     </li>
   );
 };
@@ -65,6 +67,6 @@ const TodoItemRow: View<TodoItem> = ({ value }) => {
 export const clientModules = [
   declareClientModule('@treenx/mods/todo/react', [
     declareView(TodoList, 'react', TodoListView),
-    declareView(TodoItem, 'react', TodoItemRow)
-  ])
+    declareView(TodoItem, 'react', TodoItemRow),
+  ]),
 ];

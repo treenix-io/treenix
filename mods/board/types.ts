@@ -2,8 +2,6 @@ import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Board task — universal task management, dogfooded inside Treenix
 
-
-
 /** Task card — status-driven workflow with assignment and priority */
 export class BoardTask {
   title = '';
@@ -95,9 +93,10 @@ export class BoardColumn {
 
 const declaredBoardColumn = declareClientType('board.column', BoardColumn);
 
-export const clientModules = [declareOpenModule('@treenx/mods/board/types', [], [
-  declaredBoardTask,
-  declaredBoardKanban,
-  declaredBoardOrder,
-  declaredBoardColumn,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/board/types',
+    [],
+    [declaredBoardTask, declaredBoardKanban, declaredBoardOrder, declaredBoardColumn],
+  ),
+];

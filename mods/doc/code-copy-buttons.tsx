@@ -22,9 +22,12 @@ function CodeCopyButton({ block }: { block: HTMLPreElement }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
-  useEffect(() => () => {
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   return (
     <button
@@ -68,8 +71,9 @@ export function CodeCopyButtons({
 
     let mountedBlocks: HTMLPreElement[] = [];
     const frame = window.requestAnimationFrame(() => {
-      mountedBlocks = Array.from(editor.view.dom.querySelectorAll<HTMLPreElement>('pre'))
-        .filter((block) => block.querySelector('code'));
+      mountedBlocks = Array.from(editor.view.dom.querySelectorAll<HTMLPreElement>('pre')).filter(
+        (block) => block.querySelector('code'),
+      );
       mountedBlocks.forEach((block) => block.classList.add('doc-code-copyable'));
       setBlocks(mountedBlocks);
     });
@@ -82,7 +86,5 @@ export function CodeCopyButtons({
 
   if (!enabled) return null;
 
-  return blocks.map((block, index) => (
-    createPortal(<CodeCopyButton block={block} />, block, index)
-  ));
+  return blocks.map((block, index) => createPortal(<CodeCopyButton block={block} />, block, index));
 }

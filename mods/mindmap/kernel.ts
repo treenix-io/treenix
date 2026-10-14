@@ -5,8 +5,13 @@ import schema0 from './schemas/mindmap.map.json' with { type: 'json' };
 const owner = '@treenx/mods/mindmap';
 export const manifest: ModuleManifest = {
   id: owner,
-  types: [schema0].map(schema => ({
-    name: schema.$id, module: owner, security: 'ordinary', version: 0, schema, actions: {},
+  types: [schema0].map((schema) => ({
+    name: schema.$id,
+    module: owner,
+    security: 'ordinary',
+    version: 0,
+    schema,
+    actions: {},
   })),
   security: [],
   open: [],

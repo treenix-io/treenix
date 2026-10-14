@@ -43,7 +43,13 @@ it(
         },
       },
     });
-    const autostart = await instantiateModule({ collectionId: '@treenx/core/autostart', factory: async () => (await import('../../core/src/mods/autostart/kernel')).default() }, {});
+    const autostart = await instantiateModule(
+      {
+        collectionId: '@treenx/core/autostart',
+        factory: async () => (await import('../../core/src/mods/autostart/kernel')).default(),
+      },
+      {},
+    );
     const id = randomUUID(),
       store = createMemoryStore({ domain: id });
     let saved: Position | undefined;

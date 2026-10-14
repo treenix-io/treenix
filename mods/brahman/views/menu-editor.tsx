@@ -11,18 +11,42 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
+import {
+  arrayMove,
+  horizontalListSortingStrategy,
+  SortableContext,
+  useSortable,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Badge } from '@treenx/react/ui/badge';
 import { Button } from '@treenx/react/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@treenx/react/ui/dialog';
 import { Input } from '@treenx/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@treenx/react/ui/select';
 import { useTreeEffects } from '@treenx/react';
 import { KernelError } from '@treenx/core/errors';
 import { ArrowRight, Plus, X } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';
+import {
+  ACTION_TYPES,
+  MENU_TYPES,
+  type MenuButton,
+  type MenuRow,
+  type MenuType,
+  type TString,
+} from '../types';
 import { TStringLineInput, tstringPreview } from './tstring-input';
 
 // ── Tag editor (for button tags) ──
@@ -40,21 +64,30 @@ function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap gap-1">
-        {tags.map(tag => (
+        {tags.map((tag) => (
           <Badge key={tag} variant="secondary" className="gap-1 pr-1 text-xs">
             {tag}
-            <button type="button" onClick={() => onChange(tags.filter(t => t !== tag))}
-              className="ml-0.5 rounded-full hover:bg-destructive/20 p-0.5">
+            <button
+              type="button"
+              onClick={() => onChange(tags.filter((t) => t !== tag))}
+              className="ml-0.5 rounded-full hover:bg-destructive/20 p-0.5"
+            >
               <X className="h-2.5 w-2.5" />
             </button>
           </Badge>
         ))}
       </div>
       <div className="flex gap-1">
-        <Input className="flex-1 h-7 text-xs" placeholder="tag (!exclude)" value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), add())} />
-        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={add}>+</Button>
+        <Input
+          className="flex-1 h-7 text-xs"
+          placeholder="tag (!exclude)"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+        />
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={add}>
+          +
+        </Button>
       </div>
     </div>
   );
@@ -78,11 +111,16 @@ function ButtonEditModal({
   const [draft, setDraft] = useState<MenuButton>({ ...button });
 
   function update<K extends keyof MenuButton>(key: K, val: MenuButton[K]) {
-    setDraft(prev => ({ ...prev, [key]: val }));
+    setDraft((prev) => ({ ...prev, [key]: val }));
   }
 
   return (
-    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit Button</DialogTitle>
@@ -91,26 +129,37 @@ function ButtonEditModal({
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground">Title</label>
-            <TStringLineInput value={draft.title} onChange={t => update('title', t)} langs={langs} />
+            <TStringLineInput
+              value={draft.title}
+              onChange={(t) => update('title', t)}
+              langs={langs}
+            />
           </div>
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">URL (optional)</label>
-            <Input className="h-8 text-sm" placeholder="https://..."
-              value={draft.url ?? ''} onChange={e => update('url', e.target.value || undefined)} />
+            <Input
+              className="h-8 text-sm"
+              placeholder="https://..."
+              value={draft.url ?? ''}
+              onChange={(e) => update('url', e.target.value || undefined)}
+            />
           </div>
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Tags</label>
-            <TagEditor tags={draft.tags ?? []} onChange={t => update('tags', t)} />
+            <TagEditor tags={draft.tags ?? []} onChange={(t) => update('tags', t)} />
           </div>
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Button action</label>
             <Select
               value={draft.action?.type ?? ''}
-              onValueChange={v => {
-                if (!v) { update('action', undefined); return; }
+              onValueChange={(v) => {
+                if (!v) {
+                  update('action', undefined);
+                  return;
+                }
                 update('action', { type: v });
               }}
             >
@@ -119,25 +168,42 @@ function ButtonEditModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="">No action</SelectItem>
-                {ACTION_TYPES.map(at => (
-                  <SelectItem key={at.type} value={at.type}>{at.label}</SelectItem>
+                {ACTION_TYPES.map((at) => (
+                  <SelectItem key={at.type} value={at.type}>
+                    {at.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
             {draft.action?.type === 'brahman.action.page' && (
-              <Input className="h-8 text-sm mt-1" placeholder="Target page path"
+              <Input
+                className="h-8 text-sm mt-1"
+                placeholder="Target page path"
                 value={(draft.action.target as string) ?? ''}
-                onChange={e => update('action', { ...draft.action!, target: e.target.value })} />
+                onChange={(e) => update('action', { ...draft.action!, target: e.target.value })}
+              />
             )}
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="destructive" size="sm" onClick={onDelete}>Delete</Button>
+          <Button variant="destructive" size="sm" onClick={onDelete}>
+            Delete
+          </Button>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={() => { onSave(draft); onClose(); }}>Save</Button>
+            <Button variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onSave(draft);
+                onClose();
+              }}
+            >
+              Save
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -170,7 +236,8 @@ function SortableButton({
 
   const widthPct = `${(100 / totalInRow).toFixed(1)}%`;
   const showIndicator = isOver && isCrossRow;
-  const pageTarget = button.action?.type === 'brahman.action.page' ? button.action.target as string : null;
+  const pageTarget =
+    button.action?.type === 'brahman.action.page' ? (button.action.target as string) : null;
 
   return (
     <div
@@ -182,7 +249,7 @@ function SortableButton({
         opacity: isDragging ? 0.3 : 1,
       }}
       className={`shrink-0 relative ${showIndicator ? 'ml-2' : ''}`}
-      onDragOver={e => {
+      onDragOver={(e) => {
         if (e.dataTransfer.types.includes('application/treenix-path')) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'link';
@@ -190,13 +257,14 @@ function SortableButton({
         }
       }}
       onDragLeave={() => setTreeDragOver(false)}
-      onDrop={async e => {
+      onDrop={async (e) => {
         const path = e.dataTransfer.getData('application/treenix-path');
         setTreeDragOver(false);
         if (!path) return;
         e.preventDefault();
         const kernel = effects.kernel;
-        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
+        if (kernel === undefined)
+          throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
         const copy = (await kernel.read({ node: path })).copies[0];
         if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
         if (copy.node.$type === 'brahman.page') onPageDrop(path);
@@ -217,9 +285,7 @@ function SortableButton({
           ${showIndicator ? 'border-primary/50 bg-primary/5' : ''}
           ${!treeDragOver && !showIndicator ? 'border-border bg-card hover:bg-accent' : ''}`}
       >
-        <span className="truncate">
-          {tstringPreview(button.title, 20) || 'Button'}
-        </span>
+        <span className="truncate">{tstringPreview(button.title, 20) || 'Button'}</span>
         {(button.tags?.length ?? 0) > 0 && (
           <span className="text-[9px] text-muted-foreground">({button.tags!.length})</span>
         )}
@@ -239,7 +305,7 @@ function SortableButton({
 function findButtonIn(rows: MenuRow[], id: string): { rowIdx: number; btnIdx: number } | null {
   const numId = parseInt(id.replace('btn-', ''), 10);
   for (let r = 0; r < rows.length; r++) {
-    const bi = rows[r].buttons.findIndex(b => b.id === numId);
+    const bi = rows[r].buttons.findIndex((b) => b.id === numId);
     if (bi >= 0) return { rowIdx: r, btnIdx: bi };
   }
   return null;
@@ -255,23 +321,29 @@ type MenuEditorProps = {
   onChangeRows: (rows: MenuRow[]) => void;
 };
 
-export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, onChangeRows }: MenuEditorProps) {
-  const [editingButton, setEditingButton] = useState<{ rowIdx: number; btnIdx: number } | null>(null);
+export function MenuEditor({
+  menuType = 'none',
+  rows = [],
+  langs,
+  onChangeType,
+  onChangeRows,
+}: MenuEditorProps) {
+  const [editingButton, setEditingButton] = useState<{ rowIdx: number; btnIdx: number } | null>(
+    null,
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   // Track which button we're hovering over (using ref to avoid re-render storms from @dnd-kit)
   const overIdRef = useRef<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const showRows = menuType !== 'none' && menuType !== 'remove';
   let nextId = 1;
   for (const row of rows) for (const btn of row.buttons) if (btn.id >= nextId) nextId = btn.id + 1;
 
   function defaultTitle(): TString {
-    return Object.fromEntries(langs.map(l => [l, `Button ${nextId}`]));
+    return Object.fromEntries(langs.map((l) => [l, `Button ${nextId}`]));
   }
 
   // ── DnD handlers ──
@@ -290,16 +362,20 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
       const dst = findButtonIn(rows, String(over.id));
 
       if (src && dst) {
-        const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+        const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
 
         if (src.rowIdx === dst.rowIdx) {
-          newRows[src.rowIdx].buttons = arrayMove(newRows[src.rowIdx].buttons, src.btnIdx, dst.btnIdx);
+          newRows[src.rowIdx].buttons = arrayMove(
+            newRows[src.rowIdx].buttons,
+            src.btnIdx,
+            dst.btnIdx,
+          );
         } else {
           const [btn] = newRows[src.rowIdx].buttons.splice(src.btnIdx, 1);
           newRows[dst.rowIdx].buttons.splice(dst.btnIdx, 0, btn);
         }
 
-        onChangeRows(newRows.filter(r => r.buttons.length > 0));
+        onChangeRows(newRows.filter((r) => r.buttons.length > 0));
       }
     }
 
@@ -311,7 +387,7 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
   // ── CRUD ──
 
   function addButton(rowIdx: number) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[rowIdx].buttons.push({ id: nextId, title: defaultTitle(), tags: [] });
     onChangeRows(newRows);
   }
@@ -321,15 +397,15 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
   }
 
   function updateButton(rowIdx: number, btnIdx: number, btn: MenuButton) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[rowIdx].buttons[btnIdx] = btn;
     onChangeRows(newRows);
   }
 
   function deleteButton(rowIdx: number, btnIdx: number) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[rowIdx].buttons.splice(btnIdx, 1);
-    onChangeRows(newRows.filter(r => r.buttons.length > 0));
+    onChangeRows(newRows.filter((r) => r.buttons.length > 0));
     setEditingButton(null);
   }
 
@@ -343,13 +419,15 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
       {/* Menu type selector */}
       <div className="flex items-center gap-3">
         <label className="text-xs font-medium text-muted-foreground w-20">Menu type</label>
-        <Select value={menuType} onValueChange={v => onChangeType(v as MenuType)}>
+        <Select value={menuType} onValueChange={(v) => onChangeType(v as MenuType)}>
           <SelectTrigger size="sm" className="flex-1">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MENU_TYPES.map(mt => (
-              <SelectItem key={mt.value} value={mt.value}>{mt.label}</SelectItem>
+            {MENU_TYPES.map((mt) => (
+              <SelectItem key={mt.value} value={mt.value}>
+                {mt.label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -370,7 +448,11 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
               }
             }}
             onDragEnd={handleDragEnd}
-            onDragCancel={() => { setActiveId(null); overIdRef.current = null; setOverId(null); }}
+            onDragCancel={() => {
+              setActiveId(null);
+              overIdRef.current = null;
+              setOverId(null);
+            }}
           >
             {rows.map((row, ri) => (
               <div key={ri} className="space-y-1">
@@ -378,7 +460,7 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
                   <span className="text-[10px] text-muted-foreground w-4">{ri + 1}</span>
 
                   <SortableContext
-                    items={row.buttons.map(b => `btn-${b.id}`)}
+                    items={row.buttons.map((b) => `btn-${b.id}`)}
                     strategy={horizontalListSortingStrategy}
                   >
                     <div className="flex-1 flex gap-1">
@@ -388,10 +470,12 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
                           button={btn}
                           totalInRow={row.buttons.length}
                           onClick={() => setEditingButton({ rowIdx: ri, btnIdx: bi })}
-                          onPageDrop={path => updateButton(ri, bi, {
-                            ...btn,
-                            action: { type: 'brahman.action.page', target: path },
-                          })}
+                          onPageDrop={(path) =>
+                            updateButton(ri, bi, {
+                              ...btn,
+                              action: { type: 'brahman.action.page', target: path },
+                            })
+                          }
                           isOver={overId === `btn-${btn.id}`}
                           isCrossRow={isCrossRow}
                         />
@@ -415,7 +499,8 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
             <DragOverlay>
               {activeId && activePos ? (
                 <div className="px-2 py-1.5 border border-primary rounded-md bg-card shadow-lg text-xs font-medium opacity-85">
-                  {tstringPreview(rows[activePos.rowIdx].buttons[activePos.btnIdx].title, 12) || 'Button'}
+                  {tstringPreview(rows[activePos.rowIdx].buttons[activePos.btnIdx].title, 12) ||
+                    'Button'}
                 </div>
               ) : null}
             </DragOverlay>
@@ -432,7 +517,7 @@ export function MenuEditor({ menuType = 'none', rows = [], langs, onChangeType, 
         <ButtonEditModal
           button={rows[editingButton.rowIdx].buttons[editingButton.btnIdx]}
           langs={langs}
-          onSave={btn => updateButton(editingButton.rowIdx, editingButton.btnIdx, btn)}
+          onSave={(btn) => updateButton(editingButton.rowIdx, editingButton.btnIdx, btn)}
           onDelete={() => deleteButton(editingButton.rowIdx, editingButton.btnIdx)}
           onClose={() => setEditingButton(null)}
         />

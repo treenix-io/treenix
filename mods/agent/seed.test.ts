@@ -12,7 +12,7 @@ import { AiChat, AiPolicy } from './types';
 
 const nodes = () => getPrefab('agent', 'seed')!.nodes;
 const byPath = (p: string) => {
-  const n = nodes().find(n => n.$path === p);
+  const n = nodes().find((n) => n.$path === p);
   assert.ok(n, `seed node ${p} exists`);
   return n!;
 };
@@ -23,7 +23,10 @@ describe('agent seed (core-1prz)', () => {
     const allow = g.allow as string[];
     const escalate = g.escalate as string[];
 
-    assert.ok(!allow.includes('mcp__treenix__*'), 'no blanket mcp__treenix__* (the polluted-root bug)');
+    assert.ok(
+      !allow.includes('mcp__treenix__*'),
+      'no blanket mcp__treenix__* (the polluted-root bug)',
+    );
     assert.ok(!allow.includes('*'));
     assert.ok(escalate.includes('mcp__treenix__set_node'));
     assert.ok(escalate.includes('mcp__treenix__execute:*'));
@@ -37,12 +40,12 @@ describe('agent seed (core-1prz)', () => {
     assert.ok(deny.includes('mcp__treenix__execute:*:/guardian*'));
 
     const acl = g.$acl as Array<{ g: string; p: number }>;
-    assert.equal(acl.find(e => e.g === 'admins')?.p, 15);
-    assert.equal(acl.find(e => e.g === 'agents')?.p, 1, 'agents read policy, never write it');
+    assert.equal(acl.find((e) => e.g === 'admins')?.p, 15);
+    assert.equal(acl.find((e) => e.g === 'agents')?.p, 1, 'agents read policy, never write it');
 
     const approvals = byPath('guardian/approvals');
     const aAcl = approvals.$acl as Array<{ g: string; p: number }>;
-    assert.equal(aAcl.find(e => e.g === 'agents')?.p, 0, 'agents sticky-denied on approvals');
+    assert.equal(aAcl.find((e) => e.g === 'agents')?.p, 0, 'agents sticky-denied on approvals');
   });
 
   it('agent components are deployed under # keys, never bare', () => {
@@ -61,7 +64,7 @@ describe('agent seed (core-1prz)', () => {
     assert.ok(qa);
     const policy = getComponent(qa!, AiPolicy);
     assert.ok(policy, 'AiPolicy visible to getComponent (regression: bare key was invisible)');
-    assert.ok(policy!.allow.some(p => p.startsWith('Bash:npm test')));
+    assert.ok(policy!.allow.some((p) => p.startsWith('Bash:npm test')));
     assert.ok(getComponent(qa!, AiChat), 'AiChat visible for session resume');
   });
 });

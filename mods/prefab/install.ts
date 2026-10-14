@@ -144,10 +144,22 @@ export async function installNativeSeeds(
       let after: string | undefined;
       do {
         const result = await session.read({ history: node.$path, window: { limit: 100, after } });
-        if (result.history === undefined) throw new KernelError('INVALID', 'Installation history is absent');
-        if (result.history.some(entry => entry.path === node.$path && entry.caller === session.actor.principal
-          && entry.opId?.epoch === key.epoch && entry.opId.time === key.time && entry.opId.nonce === key.nonce))
-          throw new KernelError('CONFLICT', 'Replayed seed outcome no longer has its installed target');
+        if (result.history === undefined)
+          throw new KernelError('INVALID', 'Installation history is absent');
+        if (
+          result.history.some(
+            (entry) =>
+              entry.path === node.$path &&
+              entry.caller === session.actor.principal &&
+              entry.opId?.epoch === key.epoch &&
+              entry.opId.time === key.time &&
+              entry.opId.nonce === key.nonce,
+          )
+        )
+          throw new KernelError(
+            'CONFLICT',
+            'Replayed seed outcome no longer has its installed target',
+          );
         after = result.next;
       } while (after !== undefined);
       if (mark.removed !== true && parent !== undefined) {

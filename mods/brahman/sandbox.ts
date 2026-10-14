@@ -16,7 +16,9 @@ const EVAL_STACK_BYTES = 128 * 1024;
 
 // The deadline counts thread CPU; without it every eval would fail at its first interrupt poll.
 if (typeof process.threadCpuUsage !== 'function')
-  throw new Error(`brahman sandbox needs process.threadCpuUsage (Node 23.9+); this is Node ${process.version}`);
+  throw new Error(
+    `brahman sandbox needs process.threadCpuUsage (Node 23.9+); this is Node ${process.version}`,
+  );
 
 function threadCpuMs(): number {
   const { user, system } = process.threadCpuUsage();
@@ -68,7 +70,7 @@ export async function evalExpr(expr: string, vars: Record<string, unknown> = {})
       const err = vm.dump(result.error);
       result.error.dispose();
       throw new Error(
-        `brahman eval failed: ${typeof err === 'object' && err ? (err as { message?: string }).message ?? JSON.stringify(err) : String(err)}`,
+        `brahman eval failed: ${typeof err === 'object' && err ? ((err as { message?: string }).message ?? JSON.stringify(err)) : String(err)}`,
       );
     }
     const value = vm.dump(result.value);

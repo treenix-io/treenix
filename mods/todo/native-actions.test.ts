@@ -24,10 +24,15 @@ const collected = (async () => {
   const parent = resolve(import.meta.dirname, '../../../temp/native-todo-contract');
   await mkdir(parent, { recursive: true });
   const directory = await mkdtemp(join(parent, 'bootstrap-'));
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@treenx/mods', type: 'module' }));
+  await writeFile(
+    join(directory, 'package.json'),
+    JSON.stringify({ name: '@treenx/mods', type: 'module' }),
+  );
   await mkdir(join(directory, 'todo'));
-  await writeFile(join(directory, 'todo/kernel.ts'),
-    `export { default } from ${JSON.stringify(new URL('./kernel.ts', import.meta.url).href)};\n`);
+  await writeFile(
+    join(directory, 'todo/kernel.ts'),
+    `export { default } from ${JSON.stringify(new URL('./kernel.ts', import.meta.url).href)};\n`,
+  );
   const loaded = await loadLocalMods(directory, 'kernel');
   assert.deepEqual(loaded.failed, []);
   assert.deepEqual(loaded.loaded, ['todo']);

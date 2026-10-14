@@ -6,7 +6,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { getComponent, type NodeData } from '@treenx/core';
 import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 
-
 // ── Shared types ──
 
 export type TString = Record<string, string>;
@@ -167,8 +166,7 @@ export class PageNavAction {
 const declaredBrahmanActionPage = declareClientType('brahman.action.page', PageNavAction);
 
 /** Go back — return to previous page in history */
-export class BackAction {
-}
+export class BackAction {}
 const declaredBrahmanActionBack = declareClientType('brahman.action.back', BackAction);
 
 /** Set user tag — assign key-value metadata to user */
@@ -187,7 +185,10 @@ export class BroadcastAction {
   /** @title Action to broadcast @description Path to action node */
   action = '';
 }
-const declaredBrahmanActionBroadcast = declareClientType('brahman.action.broadcast', BroadcastAction);
+const declaredBrahmanActionBroadcast = declareClientType(
+  'brahman.action.broadcast',
+  BroadcastAction,
+);
 
 /** Read session value — extract data from user session */
 export class GetValueAction {
@@ -239,8 +240,7 @@ const declaredBrahmanActionEval = declareClientType('brahman.action.eval', EvalA
 // ── Remove message ──
 
 /** Remove message — delete bot message from chat */
-export class RemoveAction {
-}
+export class RemoveAction {}
 const declaredBrahmanActionRemove = declareClientType('brahman.action.remove', RemoveAction);
 
 // ── Emit text (synthetic text injection) ──
@@ -266,16 +266,20 @@ const declaredBrahmanActionForward = declareClientType('brahman.action.forward',
 // ── Reset session ──
 
 /** Reset session — clear all user session data */
-export class ResetSessionAction {
-}
-const declaredBrahmanActionResetsession = declareClientType('brahman.action.resetsession', ResetSessionAction);
+export class ResetSessionAction {}
+const declaredBrahmanActionResetsession = declareClientType(
+  'brahman.action.resetsession',
+  ResetSessionAction,
+);
 
 // ── Reset history ──
 
 /** Reset history — clear page navigation stack */
-export class ResetHistoryAction {
-}
-const declaredBrahmanActionResethistory = declareClientType('brahman.action.resethistory', ResetHistoryAction);
+export class ResetHistoryAction {}
+const declaredBrahmanActionResethistory = declareClientType(
+  'brahman.action.resethistory',
+  ResetHistoryAction,
+);
 
 // ── On error (conditional error handler) ──
 
@@ -302,7 +306,10 @@ export class KeywordSelectAction {
   /** @title Keyword entries @description Array of {keywords, message} pairs */
   elements: KeywordEntry[] = [];
 }
-const declaredBrahmanActionKeywordselect = declareClientType('brahman.action.keywordselect', KeywordSelectAction);
+const declaredBrahmanActionKeywordselect = declareClientType(
+  'brahman.action.keywordselect',
+  KeywordSelectAction,
+);
 
 // ── Call tree action ──
 
@@ -330,7 +337,10 @@ export class SelectLanguageAction {
   /** @title Text @format tstring */
   text: TString = {};
 }
-const declaredBrahmanActionSelectlang = declareClientType('brahman.action.selectlang', SelectLanguageAction);
+const declaredBrahmanActionSelectlang = declareClientType(
+  'brahman.action.selectlang',
+  SelectLanguageAction,
+);
 
 // ── Runtime entities ──
 
@@ -381,31 +391,38 @@ const declaredText = declareText('brahman.message', (data) => {
   return msg.text;
 });
 
-export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/brahman/types', [declaredText], [
-  declaredBrahmanBot,
-  declaredBrahmanPage,
-  declaredBrahmanActionMessage,
-  declaredBrahmanActionQuestion,
-  declaredBrahmanActionIfelse,
-  declaredBrahmanActionPage,
-  declaredBrahmanActionBack,
-  declaredBrahmanActionTag,
-  declaredBrahmanActionBroadcast,
-  declaredBrahmanActionGetvalue,
-  declaredBrahmanActionSetvalue,
-  declaredBrahmanActionParams,
-  declaredBrahmanActionFile,
-  declaredBrahmanActionEval,
-  declaredBrahmanActionRemove,
-  declaredBrahmanActionEmittext,
-  declaredBrahmanActionForward,
-  declaredBrahmanActionResetsession,
-  declaredBrahmanActionResethistory,
-  declaredBrahmanActionOnerror,
-  declaredBrahmanActionKeywordselect,
-  declaredBrahmanActionCall,
-  declaredBrahmanActionSelectlang,
-  declaredBrahmanUser,
-  declaredBrahmanSession,
-  declaredBrahmanMessage,
-])];
+export const clientModules = [
+  ...primitiveTextModules,
+  declareOpenModule(
+    '@treenx/mods/brahman/types',
+    [declaredText],
+    [
+      declaredBrahmanBot,
+      declaredBrahmanPage,
+      declaredBrahmanActionMessage,
+      declaredBrahmanActionQuestion,
+      declaredBrahmanActionIfelse,
+      declaredBrahmanActionPage,
+      declaredBrahmanActionBack,
+      declaredBrahmanActionTag,
+      declaredBrahmanActionBroadcast,
+      declaredBrahmanActionGetvalue,
+      declaredBrahmanActionSetvalue,
+      declaredBrahmanActionParams,
+      declaredBrahmanActionFile,
+      declaredBrahmanActionEval,
+      declaredBrahmanActionRemove,
+      declaredBrahmanActionEmittext,
+      declaredBrahmanActionForward,
+      declaredBrahmanActionResetsession,
+      declaredBrahmanActionResethistory,
+      declaredBrahmanActionOnerror,
+      declaredBrahmanActionKeywordselect,
+      declaredBrahmanActionCall,
+      declaredBrahmanActionSelectlang,
+      declaredBrahmanUser,
+      declaredBrahmanSession,
+      declaredBrahmanMessage,
+    ],
+  ),
+];

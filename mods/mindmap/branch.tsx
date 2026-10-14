@@ -3,7 +3,7 @@ import type { PresentationNode } from '@treenx/react';
 // Each instance calls useChildren when expanded, parent draws curves
 
 import { useChildren } from '@treenx/react';
-import { createContext,useContext,useEffect,useRef } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
 
 export type EditingAt = {
   parentPath: string;
@@ -65,7 +65,10 @@ export function MindMapBranch({ node, side, color, depth }: BranchProps) {
       <g
         className={`mm-node${isSelected ? ' mm-node-selected' : ''}`}
         onClick={() => onToggle(node.$path)}
-        onContextMenu={e => { e.preventDefault(); onSelect(node.$path); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onSelect(node.$path);
+        }}
       >
         {/* Dot */}
         <circle r={isSelected ? 5 : 3.5} fill={color} className="mm-dot" />
@@ -108,10 +111,15 @@ export function MindMapBranch({ node, side, color, depth }: BranchProps) {
       <g
         className="mm-add-btn"
         transform={`translate(${isLeft ? -14 - name.length * 7.5 - 20 : 14 + name.length * 7.5 + 20},0)`}
-        onClick={e => { e.stopPropagation(); onAddChild(node.$path, side, color); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddChild(node.$path, side, color);
+        }}
       >
         <circle r={9} className="mm-add-bg" />
-        <text textAnchor="middle" dominantBaseline="central" className="mm-add-icon">+</text>
+        <text textAnchor="middle" dominantBaseline="central" className="mm-add-icon">
+          +
+        </text>
       </g>
 
       {/* Children (only fetched when expanded) */}
@@ -129,7 +137,13 @@ export function MindMapBranch({ node, side, color, depth }: BranchProps) {
 }
 
 // Inline input for naming new nodes
-function InlineInput({ x, y, side, onCommit, onCancel }: {
+function InlineInput({
+  x,
+  y,
+  side,
+  onCommit,
+  onCancel,
+}: {
   x: number;
   y: number;
   side: 'left' | 'right';
@@ -165,12 +179,7 @@ function InlineInput({ x, y, side, onCommit, onCancel }: {
   return (
     <g transform={`translate(${x},${y})`}>
       <circle r={3.5} fill="var(--accent)" />
-      <foreignObject
-        x={isLeft ? -inputW - 14 : 14}
-        y={-12}
-        width={inputW}
-        height={24}
-      >
+      <foreignObject x={isLeft ? -inputW - 14 : 14} y={-12} width={inputW} height={24}>
         <input
           ref={ref}
           className="mm-inline-input"
@@ -253,7 +262,7 @@ function BranchChildren({ path, side, color, depth, strokeW }: ChildrenProps) {
           x={dx}
           y={startY + children.length * SPACING}
           side={side}
-          onCommit={name => onCommitAdd(path, name)}
+          onCommit={(name) => onCommitAdd(path, name)}
           onCancel={onCancelAdd}
         />
       )}

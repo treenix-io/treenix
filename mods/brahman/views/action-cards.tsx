@@ -6,53 +6,59 @@ import type { ComponentData } from '@treenx/core';
 import { Button } from '@treenx/react/ui/button';
 import { Checkbox } from '@treenx/react/ui/checkbox';
 import { Input } from '@treenx/react/ui/input';
-import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@treenx/react/ui/select';
 import { Textarea } from '@treenx/react/ui/textarea';
-import { useTreeEffects,useSave,type View,usePath } from '@treenx/react';
+import { useTreeEffects, useSave, type View, usePath } from '@treenx/react';
 import { KernelError } from '@treenx/core/errors';
 import {
-AlertTriangle,
-ArrowLeft,
-Code,
-Download,
-File,
-FileText,
-Forward,
-GitBranch,
-Globe,
-HelpCircle,
-History,
-MessageSquare,
-Repeat,
-RotateCcw,
-Search,
-Send,
-Settings2,
-Tag,
-Trash2,
-Upload,
+  AlertTriangle,
+  ArrowLeft,
+  Code,
+  Download,
+  File,
+  FileText,
+  Forward,
+  GitBranch,
+  Globe,
+  HelpCircle,
+  History,
+  MessageSquare,
+  Repeat,
+  RotateCcw,
+  Search,
+  Send,
+  Settings2,
+  Tag,
+  Trash2,
+  Upload,
 } from 'lucide-react';
-import { type ReactNode,useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import type {
-BroadcastAction,
-EmitTextAction,
-EvalAction,
-FileAction,
-ForwardAction,
-GetValueAction,
-IfElseAction,
-KeywordSelectAction,
-MessageAction,
-OnErrorAction,
-PageNavAction,
-ParamsAction,
-QuestionAction,
-SelectLanguageAction,
-SetValueAction,
-TagAction,
+  BroadcastAction,
+  EmitTextAction,
+  EvalAction,
+  FileAction,
+  ForwardAction,
+  GetValueAction,
+  IfElseAction,
+  KeywordSelectAction,
+  MessageAction,
+  OnErrorAction,
+  PageNavAction,
+  ParamsAction,
+  QuestionAction,
+  SelectLanguageAction,
+  SetValueAction,
+  TagAction,
 } from '../types';
 import { MenuEditor } from './menu-editor';
-import { TStringInput,tstringPreview } from './tstring-input';
+import { TStringInput, tstringPreview } from './tstring-input';
 
 // ── Icon mapping ──
 
@@ -90,27 +96,48 @@ export function actionSummary(node: PresentationNode): string {
   if (!c) return '';
 
   switch (node.$type) {
-    case 'brahman.action.message': return tstringPreview(c.text ?? {});
-    case 'brahman.action.question': return `${tstringPreview(c.text ?? {}, 25)} -> ${c.saveTo || '?'}`;
-    case 'brahman.action.ifelse': return c.condition || 'no condition';
-    case 'brahman.action.page': return c.targetPage || 'no target';
-    case 'brahman.action.back': return 'pop history';
-    case 'brahman.action.tag': return `${c.tag} = ${c.value}`;
-    case 'brahman.action.broadcast': return `to ${(c.userTags ?? []).join(', ') || 'all'}`;
-    case 'brahman.action.getvalue': return `${c.path} -> ${c.saveTo}`;
-    case 'brahman.action.setvalue': return `${c.value} -> ${c.saveTo}`;
-    case 'brahman.action.params': return (c.names ?? []).join(', ') || 'no params';
-    case 'brahman.action.file': return c.fileId || 'no file';
-    case 'brahman.action.eval': return (c.value ?? '').slice(0, 40) || 'empty';
-    case 'brahman.action.remove': return 'delete message';
-    case 'brahman.action.emittext': return c.from || 'no text';
-    case 'brahman.action.forward': return c.toFrom || 'current chat';
-    case 'brahman.action.resetsession': return 'clear session';
-    case 'brahman.action.resethistory': return 'clear history';
-    case 'brahman.action.onerror': return c.error || 'any error';
-    case 'brahman.action.keywordselect': return `${(c.elements ?? []).length} keywords`;
-    case 'brahman.action.selectlang': return tstringPreview(c.text ?? {});
-    default: return '';
+    case 'brahman.action.message':
+      return tstringPreview(c.text ?? {});
+    case 'brahman.action.question':
+      return `${tstringPreview(c.text ?? {}, 25)} -> ${c.saveTo || '?'}`;
+    case 'brahman.action.ifelse':
+      return c.condition || 'no condition';
+    case 'brahman.action.page':
+      return c.targetPage || 'no target';
+    case 'brahman.action.back':
+      return 'pop history';
+    case 'brahman.action.tag':
+      return `${c.tag} = ${c.value}`;
+    case 'brahman.action.broadcast':
+      return `to ${(c.userTags ?? []).join(', ') || 'all'}`;
+    case 'brahman.action.getvalue':
+      return `${c.path} -> ${c.saveTo}`;
+    case 'brahman.action.setvalue':
+      return `${c.value} -> ${c.saveTo}`;
+    case 'brahman.action.params':
+      return (c.names ?? []).join(', ') || 'no params';
+    case 'brahman.action.file':
+      return c.fileId || 'no file';
+    case 'brahman.action.eval':
+      return (c.value ?? '').slice(0, 40) || 'empty';
+    case 'brahman.action.remove':
+      return 'delete message';
+    case 'brahman.action.emittext':
+      return c.from || 'no text';
+    case 'brahman.action.forward':
+      return c.toFrom || 'current chat';
+    case 'brahman.action.resetsession':
+      return 'clear session';
+    case 'brahman.action.resethistory':
+      return 'clear history';
+    case 'brahman.action.onerror':
+      return c.error || 'any error';
+    case 'brahman.action.keywordselect':
+      return `${(c.elements ?? []).length} keywords`;
+    case 'brahman.action.selectlang':
+      return tstringPreview(c.text ?? {});
+    default:
+      return '';
   }
 }
 
@@ -119,8 +146,13 @@ function findActionComp(node: PresentationNode): Record<string, unknown> | undef
   if (node.$type?.startsWith('brahman.action.')) return node;
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$')) continue;
-    if (typeof v === 'object' && v && '$type' in v && typeof (v as any).$type === 'string'
-      && (v as any).$type.startsWith('brahman.action.')) {
+    if (
+      typeof v === 'object' &&
+      v &&
+      '$type' in v &&
+      typeof (v as any).$type === 'string' &&
+      (v as any).$type.startsWith('brahman.action.')
+    ) {
       return v as Record<string, unknown>;
     }
   }
@@ -131,7 +163,9 @@ function findActionComp(node: PresentationNode): Record<string, unknown> | undef
 function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <label className="text-xs font-medium text-muted-foreground w-28 pt-2 shrink-0">{label}</label>
+      <label className="text-xs font-medium text-muted-foreground w-28 pt-2 shrink-0">
+        {label}
+      </label>
       <div className="flex-1">{children}</div>
     </div>
   );
@@ -162,13 +196,13 @@ export const MessageEditor: View<MessageAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Text">
-        <TStringInput value={msg.text} onChange={text => update({ text })} langs={langs} />
+        <TStringInput value={msg.text} onChange={(text) => update({ text })} langs={langs} />
       </FieldRow>
 
       <FieldRow label="Disable links">
         <Checkbox
           checked={msg.disableLinks}
-          onChange={e => update({ disableLinks: e.target.checked })}
+          onChange={(e) => update({ disableLinks: e.target.checked })}
         />
       </FieldRow>
 
@@ -176,12 +210,12 @@ export const MessageEditor: View<MessageAction> = ({ ctx }) => {
         menuType={msg.menuType}
         rows={msg.rows}
         langs={langs}
-        onChangeType={menuType => update({ menuType })}
-        onChangeRows={rows => update({ rows })}
+        onChangeType={(menuType) => update({ menuType })}
+        onChangeRows={(rows) => update({ rows })}
       />
     </div>
   );
-}
+};
 
 export const QuestionEditor: View<QuestionAction> = ({ ctx }) => {
   const { comp, update, langs } = useActionComp(ctx!.path);
@@ -191,11 +225,11 @@ export const QuestionEditor: View<QuestionAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Prompt">
-        <TStringInput value={q.text} onChange={text => update({ text })} langs={langs} />
+        <TStringInput value={q.text} onChange={(text) => update({ text })} langs={langs} />
       </FieldRow>
 
       <FieldRow label="Input type">
-        <Select value={q.inputType} onValueChange={v => update({ inputType: v })}>
+        <Select value={q.inputType} onValueChange={(v) => update({ inputType: v })}>
           <SelectTrigger size="sm">
             <SelectValue />
           </SelectTrigger>
@@ -207,12 +241,16 @@ export const QuestionEditor: View<QuestionAction> = ({ ctx }) => {
       </FieldRow>
 
       <FieldRow label="Save to">
-        <Input className="font-mono" placeholder="session.field"
-          value={q.saveTo} onChange={e => update({ saveTo: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="session.field"
+          value={q.saveTo}
+          onChange={(e) => update({ saveTo: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const IfElseEditor: View<IfElseAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -222,27 +260,41 @@ export const IfElseEditor: View<IfElseAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Condition">
-        <Input className="font-mono" placeholder="session.data.role === 'admin'"
-          value={ie.condition} onChange={e => update({ condition: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="session.data.role === 'admin'"
+          value={ie.condition}
+          onChange={(e) => update({ condition: e.target.value })}
+        />
       </FieldRow>
 
       <FieldRow label="Action if true">
-        <Input className="font-mono" placeholder="/path/to/action"
-          value={ie.actionIf} onChange={e => update({ actionIf: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/path/to/action"
+          value={ie.actionIf}
+          onChange={(e) => update({ actionIf: e.target.value })}
+        />
       </FieldRow>
 
       <FieldRow label="Action if false">
-        <Input className="font-mono" placeholder="/path/to/action"
-          value={ie.actionElse} onChange={e => update({ actionElse: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/path/to/action"
+          value={ie.actionElse}
+          onChange={(e) => update({ actionElse: e.target.value })}
+        />
       </FieldRow>
 
       <FieldRow label="Stop after">
-        <Checkbox checked={ie.stopAfterAction}
-          onChange={e => update({ stopAfterAction: e.target.checked })} />
+        <Checkbox
+          checked={ie.stopAfterAction}
+          onChange={(e) => update({ stopAfterAction: e.target.checked })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const PageNavEditor: View<PageNavAction> = ({ ctx }) => {
   const effects = useTreeEffects();
@@ -255,7 +307,7 @@ export const PageNavEditor: View<PageNavAction> = ({ ctx }) => {
       <FieldRow label="Target page">
         <div
           className={`rounded-md transition-colors ${dragOver ? 'ring-1 ring-primary bg-primary/5' : ''}`}
-          onDragOver={e => {
+          onDragOver={(e) => {
             if (e.dataTransfer.types.includes('application/treenix-path')) {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'link';
@@ -263,26 +315,30 @@ export const PageNavEditor: View<PageNavAction> = ({ ctx }) => {
             }
           }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={async e => {
+          onDrop={async (e) => {
             const path = e.dataTransfer.getData('application/treenix-path');
             setDragOver(false);
             if (!path) return;
             e.preventDefault();
             const kernel = effects.kernel;
-            if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
+            if (kernel === undefined)
+              throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
             const copy = (await kernel.read({ node: path })).copies[0];
             if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
             if (copy.node.$type === 'brahman.page') update({ targetPage: path });
           }}
         >
-          <Input className="font-mono" placeholder="Drop a page here or type path"
+          <Input
+            className="font-mono"
+            placeholder="Drop a page here or type path"
             value={(comp as any).targetPage ?? ''}
-            onChange={e => update({ targetPage: e.target.value })} />
+            onChange={(e) => update({ targetPage: e.target.value })}
+          />
         </div>
       </FieldRow>
     </div>
   );
-}
+};
 
 export function BackEditor() {
   return (
@@ -300,15 +356,23 @@ export const TagEditor: View<TagAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Tag name">
-        <Input placeholder="admin" value={t.tag} onChange={e => update({ tag: e.target.value })} />
+        <Input
+          placeholder="admin"
+          value={t.tag}
+          onChange={(e) => update({ tag: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Value">
-        <Input className="font-mono" placeholder="true" value={t.value}
-          onChange={e => update({ value: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="true"
+          value={t.value}
+          onChange={(e) => update({ value: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const BroadcastEditor: View<BroadcastAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -318,16 +382,30 @@ export const BroadcastEditor: View<BroadcastAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="User tags">
-        <Input placeholder="premium, active" value={b.userTags.join(', ')}
-          onChange={e => update({ userTags: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+        <Input
+          placeholder="premium, active"
+          value={b.userTags.join(', ')}
+          onChange={(e) =>
+            update({
+              userTags: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+        />
       </FieldRow>
       <FieldRow label="Action path">
-        <Input className="font-mono" placeholder="/path/to/action"
-          value={b.action} onChange={e => update({ action: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/path/to/action"
+          value={b.action}
+          onChange={(e) => update({ action: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const GetValueEditor: View<GetValueAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -337,16 +415,24 @@ export const GetValueEditor: View<GetValueAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Source path">
-        <Input className="font-mono" placeholder="session.data.name"
-          value={g.path} onChange={e => update({ path: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="session.data.name"
+          value={g.path}
+          onChange={(e) => update({ path: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Save to">
-        <Input className="font-mono" placeholder="result"
-          value={g.saveTo} onChange={e => update({ saveTo: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="result"
+          value={g.saveTo}
+          onChange={(e) => update({ saveTo: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const SetValueEditor: View<SetValueAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -356,16 +442,24 @@ export const SetValueEditor: View<SetValueAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Value">
-        <Input className="font-mono" placeholder="'hello'" value={s.value}
-          onChange={e => update({ value: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="'hello'"
+          value={s.value}
+          onChange={(e) => update({ value: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Save to">
-        <Input className="font-mono" placeholder="session.data.greeting"
-          value={s.saveTo} onChange={e => update({ saveTo: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="session.data.greeting"
+          value={s.saveTo}
+          onChange={(e) => update({ saveTo: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const ParamsEditor: View<ParamsAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -375,19 +469,32 @@ export const ParamsEditor: View<ParamsAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Base64 decode">
-        <Checkbox checked={p.base64} onChange={e => update({ base64: e.target.checked })} />
+        <Checkbox checked={p.base64} onChange={(e) => update({ base64: e.target.checked })} />
       </FieldRow>
       <FieldRow label="Split delimiter">
-        <Input className="w-20 font-mono" value={p.split}
-          onChange={e => update({ split: e.target.value })} />
+        <Input
+          className="w-20 font-mono"
+          value={p.split}
+          onChange={(e) => update({ split: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Param names">
-        <Input placeholder="id, name, email" value={p.names.join(', ')}
-          onChange={e => update({ names: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+        <Input
+          placeholder="id, name, email"
+          value={p.names.join(', ')}
+          onChange={(e) =>
+            update({
+              names: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const FileEditor: View<FileAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -397,11 +504,15 @@ export const FileEditor: View<FileAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="File path">
-        <Input className="font-mono" placeholder="/files/image.png"
-          value={f.fileId} onChange={e => update({ fileId: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/files/image.png"
+          value={f.fileId}
+          onChange={(e) => update({ fileId: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Send as">
-        <Select value={f.asType ?? ''} onValueChange={v => update({ asType: v })}>
+        <Select value={f.asType ?? ''} onValueChange={(v) => update({ asType: v })}>
           <SelectTrigger size="sm">
             <SelectValue />
           </SelectTrigger>
@@ -417,7 +528,7 @@ export const FileEditor: View<FileAction> = ({ ctx }) => {
       </FieldRow>
     </div>
   );
-}
+};
 
 // ── New action editors ──
 
@@ -433,12 +544,12 @@ export const EvalEditor: View<EvalAction> = ({ ctx }) => {
           className="h-40 font-mono text-sm resize-y"
           placeholder={"// async function body\nawait ctx.reply('Hello');"}
           value={ev.value}
-          onChange={e => update({ value: e.target.value })}
+          onChange={(e) => update({ value: e.target.value })}
         />
       </FieldRow>
     </div>
   );
-}
+};
 
 export function RemoveEditor() {
   return (
@@ -456,12 +567,16 @@ export const EmitTextEditor: View<EmitTextAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Text template">
-        <Input className="font-mono" placeholder="/start or {data.command}"
-          value={et.from} onChange={e => update({ from: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/start or {data.command}"
+          value={et.from}
+          onChange={(e) => update({ from: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const ForwardEditor: View<ForwardAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -471,16 +586,24 @@ export const ForwardEditor: View<ForwardAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Message ID from">
-        <Input className="font-mono" placeholder="Empty = current message"
-          value={fw.msgIdFrom} onChange={e => update({ msgIdFrom: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="Empty = current message"
+          value={fw.msgIdFrom}
+          onChange={(e) => update({ msgIdFrom: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Forward to">
-        <Input className="font-mono" placeholder="Chat/user ID or {data.to}"
-          value={fw.toFrom} onChange={e => update({ toFrom: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="Chat/user ID or {data.to}"
+          value={fw.toFrom}
+          onChange={(e) => update({ toFrom: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export function ResetSessionEditor() {
   return (
@@ -506,16 +629,23 @@ export const OnErrorEditor: View<OnErrorAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Error match">
-        <Input placeholder="Substring to match in error message (empty = any)"
-          value={oe.error} onChange={e => update({ error: e.target.value })} />
+        <Input
+          placeholder="Substring to match in error message (empty = any)"
+          value={oe.error}
+          onChange={(e) => update({ error: e.target.value })}
+        />
       </FieldRow>
       <FieldRow label="Action path">
-        <Input className="font-mono" placeholder="/path/to/action"
-          value={oe.action} onChange={e => update({ action: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="/path/to/action"
+          value={oe.action}
+          onChange={(e) => update({ action: e.target.value })}
+        />
       </FieldRow>
     </div>
   );
-}
+};
 
 export const KeywordSelectEditor: View<KeywordSelectAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
@@ -541,8 +671,12 @@ export const KeywordSelectEditor: View<KeywordSelectAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Source text">
-        <Input className="font-mono" placeholder="{data.text} or empty for message text"
-          value={ks.textFrom} onChange={e => update({ textFrom: e.target.value })} />
+        <Input
+          className="font-mono"
+          placeholder="{data.text} or empty for message text"
+          value={ks.textFrom}
+          onChange={(e) => update({ textFrom: e.target.value })}
+        />
       </FieldRow>
 
       <div className="space-y-2">
@@ -550,15 +684,31 @@ export const KeywordSelectEditor: View<KeywordSelectAction> = ({ ctx }) => {
         {(ks.elements ?? []).map((el, i) => (
           <div key={i} className="flex gap-2 items-start p-2 border border-border rounded-md">
             <div className="flex-1 space-y-1">
-              <Input placeholder="keyword1, keyword2" value={el.keywords.join(', ')}
-                onChange={e => updateElement(i, {
-                  keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
-                })} />
-              <Input className="font-mono" placeholder="/command or reply text"
-                value={el.message} onChange={e => updateElement(i, { message: e.target.value })} />
+              <Input
+                placeholder="keyword1, keyword2"
+                value={el.keywords.join(', ')}
+                onChange={(e) =>
+                  updateElement(i, {
+                    keywords: e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+              <Input
+                className="font-mono"
+                placeholder="/command or reply text"
+                value={el.message}
+                onChange={(e) => updateElement(i, { message: e.target.value })}
+              />
             </div>
-            <Button variant="ghost" size="sm" onClick={() => removeElement(i)}
-              className="text-muted-foreground hover:text-destructive p-1 h-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => removeElement(i)}
+              className="text-muted-foreground hover:text-destructive p-1 h-auto"
+            >
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
@@ -569,7 +719,7 @@ export const KeywordSelectEditor: View<KeywordSelectAction> = ({ ctx }) => {
       </div>
     </div>
   );
-}
+};
 
 export const SelectLanguageEditor: View<SelectLanguageAction> = ({ ctx }) => {
   const { comp, update, langs } = useActionComp(ctx!.path);
@@ -579,11 +729,11 @@ export const SelectLanguageEditor: View<SelectLanguageAction> = ({ ctx }) => {
   return (
     <div className="space-y-4 max-w-2xl">
       <FieldRow label="Prompt text">
-        <TStringInput value={sl.text} onChange={text => update({ text })} langs={langs} />
+        <TStringInput value={sl.text} onChange={(text) => update({ text })} langs={langs} />
       </FieldRow>
     </div>
   );
-}
+};
 
 // ── Compact list items (react:list context) ──
 

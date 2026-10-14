@@ -5,7 +5,14 @@ import schema0 from './schemas/t.route.json' with { type: 'json' };
 export const manifest: ModuleManifest = {
   id: '@treenx/router',
   types: [
-    { name: 't.route', module: '@treenx/router', security: 'ordinary', version: 0, schema: schema0, actions: {} },
+    {
+      name: 't.route',
+      module: '@treenx/router',
+      security: 'ordinary',
+      version: 0,
+      schema: schema0,
+      actions: {},
+    },
   ],
   security: [],
   open: [],

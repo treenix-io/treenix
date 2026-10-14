@@ -5,7 +5,9 @@ import { check, sources } from './tree-client-boundary';
 
 describe('mod transport boundary', () => {
   it('views import consumer operations without access to the transport or mutable cache', () => {
-    const violations = [...sources(import.meta.dirname)].flatMap(path => check(readFileSync(path, 'utf8'), path));
+    const violations = [...sources(import.meta.dirname)].flatMap((path) =>
+      check(readFileSync(path, 'utf8'), path),
+    );
     assert.deepEqual(violations, []);
   });
 
@@ -17,7 +19,11 @@ describe('mod transport boundary', () => {
       "import { get } from '@treenx/react/tree/cache'",
       "export { tree as store } from '@treenx/react'",
       "const client = await import('@treenx/react/tree/trpc')",
-    ]) assert.equal(check(source, 'view.tsx').length, 1);
-    assert.deepEqual(check("import { treeClient, useSave, useActions } from '@treenx/react'", 'view.tsx'), []);
+    ])
+      assert.equal(check(source, 'view.tsx').length, 1);
+    assert.deepEqual(
+      check("import { treeClient, useSave, useActions } from '@treenx/react'", 'view.tsx'),
+      [],
+    );
   });
 });

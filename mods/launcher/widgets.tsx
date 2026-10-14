@@ -18,12 +18,12 @@ const KanbanWidget: FC<RenderProps> = ({ value }) => {
 function KanbanWidgetInner({ path }: { path: string }) {
   const { data: children } = useChildren(path, { watch: true, watchNew: true });
   const columns = children
-    .filter(c => c.$type === 'board.column')
+    .filter((c) => c.$type === 'board.column')
     .sort((a, b) => (getComponent(a, Order)?.order ?? 0) - (getComponent(b, Order)?.order ?? 0));
 
   return (
     <div className="flex h-full flex-col justify-between gap-1">
-      {columns.map(col => (
+      {columns.map((col) => (
         <ColumnRow key={col.$path} col={col} />
       ))}
     </div>
@@ -46,15 +46,13 @@ function ColumnRow({ col }: { col: PresentationNode }) {
   );
 }
 
-
-
 // ── todo.list widget — compact checklist ──
 
 const TodoWidget: FC<RenderProps> = ({ value }) => {
   const node = value as NodeData;
   // value might be the todo dir — find the list child
   const { data: children } = useChildren(node.$path, { watch: true, watchNew: true });
-  const list = children.find(c => c.$type === 'todo.list');
+  const list = children.find((c) => c.$type === 'todo.list');
 
   if (list) return <TodoListItems path={list.$path} />;
 
@@ -64,7 +62,7 @@ const TodoWidget: FC<RenderProps> = ({ value }) => {
 
 function TodoListItems({ path }: { path: string }) {
   const { data: items } = useChildren(path, { watch: true, watchNew: true });
-  const doneCount = items.filter(i => i.done).length;
+  const doneCount = items.filter((i) => i.done).length;
 
   return (
     <div className="flex h-full flex-col">
@@ -73,7 +71,7 @@ function TodoListItems({ path }: { path: string }) {
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-        {items.slice(0, 5).map(item => (
+        {items.slice(0, 5).map((item) => (
           <Render key={item.$path} value={item} />
         ))}
         {items.length > 5 && (
@@ -87,26 +85,25 @@ function TodoListItems({ path }: { path: string }) {
 const TodoItemCompact: View<TodoItem> = ({ value }) => {
   return (
     <div className="flex items-center gap-1.5">
-      <span className={cn(
-        'flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-[8px]',
-        value.done
-          ? 'border-green-400/50 bg-green-500/30 text-green-300'
-          : 'border-white/20',
-      )}>
+      <span
+        className={cn(
+          'flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-[8px]',
+          value.done ? 'border-green-400/50 bg-green-500/30 text-green-300' : 'border-white/20',
+        )}
+      >
         {value.done ? '✓' : ''}
       </span>
-      <span className={cn(
-        'truncate text-[11px]',
-        value.done ? 'text-white/30 line-through' : 'text-white/80',
-      )}>
+      <span
+        className={cn(
+          'truncate text-[11px]',
+          value.done ? 'text-white/30 line-through' : 'text-white/80',
+        )}
+      >
         {value.title}
       </span>
     </div>
   );
 };
-
-
-
 
 // ── examples.demo.sensor widget — last value + mini bars ──
 
@@ -117,7 +114,8 @@ const SensorWidget: FC<RenderProps> = ({ value }) => {
   const latest = last5[last5.length - 1];
 
   const latestVal = typeof latest?.value === 'number' ? latest.value : null;
-  const latestTs = typeof latest?.ts === 'number' ? new Date(latest.ts).toLocaleTimeString() : '--:--';
+  const latestTs =
+    typeof latest?.ts === 'number' ? new Date(latest.ts).toLocaleTimeString() : '--:--';
 
   return (
     <div className="flex h-full items-center gap-3">
@@ -145,15 +143,11 @@ const SensorWidget: FC<RenderProps> = ({ value }) => {
             />
           );
         })}
-        {last5.length === 0 && (
-          <span className="text-[10px] text-white/30">No data</span>
-        )}
+        {last5.length === 0 && <span className="text-[10px] text-white/30">No data</span>}
       </div>
     </div>
   );
 };
-
-
 
 // ── Default widget fallback — type + icon ──
 
@@ -176,6 +170,6 @@ export const clientModules = [
     declareView('todo.list', 'react:widget', TodoWidget),
     declareView(TodoItem, 'react:widget', TodoItemCompact),
     declareView('examples.demo.sensor', 'react:widget', SensorWidget),
-    declareView('default', 'react:widget', DefaultWidget)
-  ])
+    declareView('default', 'react:widget', DefaultWidget),
+  ]),
 ];

@@ -21,7 +21,10 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
     if (!editor) return;
     const check = () => {
       const pos = typeof getPos === 'function' ? getPos() : -1;
-      if (pos === -1) { setRangeSelected(false); return; }
+      if (pos === -1) {
+        setRangeSelected(false);
+        return;
+      }
       const { from, to } = editor.state.selection;
       const end = pos + node.nodeSize;
       const covers = from < end && to > pos;
@@ -37,7 +40,10 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
 
   const effectiveType = refNode?.$type ?? type ?? '';
   const availableContexts = effectiveType
-    ? registry.contexts(effectiveType).filter((c) => c.startsWith('react')).sort()
+    ? registry
+        .contexts(effectiveType)
+        .filter((c) => c.startsWith('react'))
+        .sort()
     : [];
 
   const renderContent = () => {
@@ -80,7 +86,12 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
     <NodeViewWrapper className="my-2">
       <div
         className="relative group"
-        style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          overflow: 'hidden',
+          background: 'var(--surface)',
+        }}
       >
         {editable && (
           <div
@@ -132,7 +143,10 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
         <div contentEditable={false}>{renderContent()}</div>
 
         {rangeSelected && (
-          <div className="absolute inset-0 rounded-[6px] pointer-events-none" style={{ background: 'rgba(46, 204, 113, 0.2)' }} />
+          <div
+            className="absolute inset-0 rounded-[6px] pointer-events-none"
+            style={{ background: 'rgba(46, 204, 113, 0.2)' }}
+          />
         )}
       </div>
     </NodeViewWrapper>

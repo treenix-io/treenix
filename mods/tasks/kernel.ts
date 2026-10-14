@@ -6,8 +6,12 @@ import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 
 export default function createNativeTasks(): NativeModuleDeployment {
   return {
-    manifest: nativeClassModule('@treenx/mods/tasks', {
-      't.task': Task,
-    }, readSchemasFromDir(fileURLToPath(new URL('./schemas', import.meta.url)))),
+    manifest: nativeClassModule(
+      '@treenx/mods/tasks',
+      {
+        't.task': Task,
+      },
+      readSchemasFromDir(fileURLToPath(new URL('./schemas', import.meta.url))),
+    ),
   };
 }

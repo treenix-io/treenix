@@ -31,8 +31,19 @@ export interface BrahmanFlow {
   readonly action?: string;
   readonly stop?: boolean;
   readonly emittedText?: string;
-  readonly broadcast?: readonly { readonly action: string; readonly userId: number; readonly chatId: number; readonly lang: string }[];
-  readonly call?: { readonly path: string; readonly component?: string; readonly action: string; readonly args: unknown; readonly saveTo?: string };
+  readonly broadcast?: readonly {
+    readonly action: string;
+    readonly userId: number;
+    readonly chatId: number;
+    readonly lang: string;
+  }[];
+  readonly call?: {
+    readonly path: string;
+    readonly component?: string;
+    readonly action: string;
+    readonly args: unknown;
+    readonly saveTo?: string;
+  };
 }
 
 export interface TelegramMessageOptions {
@@ -44,8 +55,19 @@ export interface TelegramMessageOptions {
 
 /** The external adapter owns bot credentials and request cancellation. */
 export interface BrahmanTelegram {
-  send(botPath: string, chatId: number | string, text: string, options: TelegramMessageOptions): Promise<number>;
-  edit(botPath: string, chatId: number, messageId: number, text: string, options: TelegramMessageOptions): Promise<void>;
+  send(
+    botPath: string,
+    chatId: number | string,
+    text: string,
+    options: TelegramMessageOptions,
+  ): Promise<number>;
+  edit(
+    botPath: string,
+    chatId: number,
+    messageId: number,
+    text: string,
+    options: TelegramMessageOptions,
+  ): Promise<void>;
   remove(botPath: string, chatId: number, messageId: number): Promise<void>;
   forward(botPath: string, chatId: number, fromChatId: number, messageId: number): Promise<number>;
   file(botPath: string, chatId: number, kind: string, fileId: string): Promise<number>;
@@ -59,21 +81,40 @@ declare module '@treenx/core/kernel/types' {
 }
 
 const mediaSchema: JsonSchema = {
-  type: 'object', additionalProperties: false, required: ['fileId', 'mime'],
+  type: 'object',
+  additionalProperties: false,
+  required: ['fileId', 'mime'],
   properties: { fileId: { type: 'string', minLength: 1 }, mime: { type: 'string', minLength: 1 } },
 };
 
 export const brahmanRunSchema: JsonSchema = {
-  type: 'object', additionalProperties: false,
+  type: 'object',
+  additionalProperties: false,
   required: ['botPath', 'userId', 'chatId', 'lang', 'update'],
   properties: {
-    botPath: { type: 'string' }, userId: { type: 'integer' }, chatId: { type: 'integer' }, lang: { type: 'string' },
-    update: { type: 'object', additionalProperties: false, properties: {
-      text: { type: 'string' }, messageId: { type: 'integer' }, photo: { type: 'string' }, callbackData: { type: 'string' },
-      firstName: { type: 'string' }, lastName: { type: 'string' }, username: { type: 'string' },
-      voice: mediaSchema, audio: mediaSchema,
-    } },
+    botPath: { type: 'string' },
+    userId: { type: 'integer' },
+    chatId: { type: 'integer' },
+    lang: { type: 'string' },
+    update: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        text: { type: 'string' },
+        messageId: { type: 'integer' },
+        photo: { type: 'string' },
+        callbackData: { type: 'string' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+        username: { type: 'string' },
+        voice: mediaSchema,
+        audio: mediaSchema,
+      },
+    },
   },
 };
 
-export type BrahmanNativeHandler = (context: WriteActionContext, args: BrahmanRunArgs) => Promise<BrahmanFlow | void>;
+export type BrahmanNativeHandler = (
+  context: WriteActionContext,
+  args: BrahmanRunArgs,
+) => Promise<BrahmanFlow | void>;

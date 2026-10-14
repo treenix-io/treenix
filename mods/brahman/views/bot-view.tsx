@@ -10,7 +10,9 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
       <span className="text-sm text-muted-foreground w-32 shrink-0">{label}</span>
-      <span className={`text-sm ${value ? '' : 'text-muted-foreground/50 italic'}`}>{value || '—'}</span>
+      <span className={`text-sm ${value ? '' : 'text-muted-foreground/50 italic'}`}>
+        {value || '—'}
+      </span>
     </div>
   );
 }
@@ -31,7 +33,14 @@ export const BotView: View<BotConfig> = ({ value, ctx }) => {
           <div className="text-lg font-semibold">{bot.name || bot.alias || 'Untitled Bot'}</div>
           <div className="flex items-center gap-2">
             {bot.alias && <span className="text-sm text-muted-foreground">{bot.alias}</span>}
-            <Badge variant={isActive ? 'default' : 'secondary'} className={isActive ? 'bg-green-500/10 text-green-600 hover:bg-green-500/10' : 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/10'}>
+            <Badge
+              variant={isActive ? 'default' : 'secondary'}
+              className={
+                isActive
+                  ? 'bg-green-500/10 text-green-600 hover:bg-green-500/10'
+                  : 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/10'
+              }
+            >
               {isActive ? 'Active' : 'Maintenance'}
             </Badge>
           </div>
@@ -69,4 +78,4 @@ export const BotView: View<BotConfig> = ({ value, ctx }) => {
       </div>
     </div>
   );
-}
+};

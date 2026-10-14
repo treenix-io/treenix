@@ -11,7 +11,7 @@
 import { parseYaml, type YamlValue, yamlScalar } from '@treenx/core/util/yaml';
 
 const KNOWN_KEYS = ['title', 'description', 'tags', 'section', 'order'] as const;
-type KnownKey = typeof KNOWN_KEYS[number];
+type KnownKey = (typeof KNOWN_KEYS)[number];
 
 export type DocFrontmatterData = {
   title?: string;

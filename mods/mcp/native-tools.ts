@@ -9,30 +9,83 @@ import type { McpSession } from '#mcp/mcp-session';
 /** Validate external tool arguments and bind them to one authenticated native session. */
 export function createNativeMcpServer(session: McpSession): McpServer {
   const server = new McpServer({ name: 'treenix', version: '1.0.0' });
-  const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
+  const result = (value: unknown) => ({
+    content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+  });
   const path = z.string().startsWith('/');
   const opId = z.custom<OpId>(operationId).optional();
   const expect = z.custom<Preconditions>(preconditions).optional();
-  const pre = z.custom<NonNullable<ActRequest['pre']>>(value => isRequest({
-    t: 'act', req: 'metadata', path: '/', action: 'metadata', args: {}, pre: value,
-  })).optional();
+  const pre = z
+    .custom<NonNullable<ActRequest['pre']>>((value) =>
+      isRequest({
+        t: 'act',
+        req: 'metadata',
+        path: '/',
+        action: 'metadata',
+        args: {},
+        pre: value,
+      }),
+    )
+    .optional();
 
   async function tool(operation: Promise<unknown>) {
-    try { return result(await operation); }
-    catch (error) {
+    try {
+      return result(await operation);
+    } catch (error) {
       if (!(error instanceof KernelError)) throw error;
       return { ...result({ code: error.code, message: error.message }), isError: true };
     }
   }
 
-  server.registerTool('get_node', { inputSchema: { path } }, async input => tool(session.get_node(input)));
-  server.registerTool('list_children', { inputSchema: { path } }, async input => tool(session.list_children(input)));
-  server.registerTool('execute', { inputSchema: { path, action: z.string(), component: z.string().optional(), args: z.unknown(), opId, anchor: opId, pre } }, async input => tool(session.execute(input)));
-  server.registerTool('deploy_prefab', { inputSchema: { source: path, target: path, allowAbsolute: z.boolean().optional(), opId, pre } }, async input => tool(session.deploy_prefab(input)));
-  server.registerTool('set_node', { inputSchema: { path, type: z.string(), fields: z.record(z.unknown()), opId, expect } }, async input => tool(session.set_node({ node: { ...input.fields, $path: input.path, $type: input.type }, opId: input.opId, expect: input.expect })));
-  server.registerTool('remove_node', { inputSchema: { path, opId, expect } }, async input => tool(session.remove_node(input)));
+  server.registerTool('get_node', { inputSchema: { path } }, async (input) =>
+    tool(session.get_node(input)),
+  );
+  server.registerTool('list_children', { inputSchema: { path } }, async (input) =>
+    tool(session.list_children(input)),
+  );
+  server.registerTool(
+    'execute',
+    {
+      inputSchema: {
+        path,
+        action: z.string(),
+        component: z.string().optional(),
+        args: z.unknown(),
+        opId,
+        anchor: opId,
+        pre,
+      },
+    },
+    async (input) => tool(session.execute(input)),
+  );
+  server.registerTool(
+    'deploy_prefab',
+    {
+      inputSchema: { source: path, target: path, allowAbsolute: z.boolean().optional(), opId, pre },
+    },
+    async (input) => tool(session.deploy_prefab(input)),
+  );
+  server.registerTool(
+    'set_node',
+    { inputSchema: { path, type: z.string(), fields: z.record(z.unknown()), opId, expect } },
+    async (input) =>
+      tool(
+        session.set_node({
+          node: { ...input.fields, $path: input.path, $type: input.type },
+          opId: input.opId,
+          expect: input.expect,
+        }),
+      ),
+  );
+  server.registerTool('remove_node', { inputSchema: { path, opId, expect } }, async (input) =>
+    tool(session.remove_node(input)),
+  );
   server.registerTool('catalog', { inputSchema: {} }, async () => tool(session.catalog()));
-  server.registerTool('describe_type', { inputSchema: { type: z.string() } }, async input => tool(session.describe_type(input)));
-  server.registerTool('search_types', { inputSchema: { query: z.string() } }, async input => tool(session.search_types(input)));
+  server.registerTool('describe_type', { inputSchema: { type: z.string() } }, async (input) =>
+    tool(session.describe_type(input)),
+  );
+  server.registerTool('search_types', { inputSchema: { query: z.string() } }, async (input) =>
+    tool(session.search_types(input)),
+  );
   return server;
 }

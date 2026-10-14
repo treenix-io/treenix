@@ -6,14 +6,7 @@ import { join, resolve } from 'node:path';
 import { describe, it, type TestContext } from 'node:test';
 import { createNode } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import {
-  R,
-  W,
-  type Node,
-  type NodeInput,
-  type OpId,
-  type Session,
-} from '@treenx/core/kernel';
+import { R, W, type Node, type NodeInput, type OpId, type Session } from '@treenx/core/kernel';
 import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { scanBudget } from '@treenx/core/kernel/testing';
 import checklistSchema from './schemas/simple.checklist.json';
@@ -25,25 +18,37 @@ import timeTrackSchema from './schemas/simple.time-track.json';
 import { loadLocalMods } from '@treenx/core/mod';
 
 const hostPath = '/work/card';
-const componentKeys = ['#checklist', '#tags', '#estimate', '#links', '#comments', '#timeTrack'] as const;
+const componentKeys = [
+  '#checklist',
+  '#tags',
+  '#estimate',
+  '#links',
+  '#comments',
+  '#timeTrack',
+] as const;
 const composition = (async () => {
   const parent = resolve(import.meta.dirname, '../../../temp/native-components-contract');
   await mkdir(parent, { recursive: true });
   const directory = await mkdtemp(join(parent, 'bootstrap-'));
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@treenx/mods', type: 'module' }));
+  await writeFile(
+    join(directory, 'package.json'),
+    JSON.stringify({ name: '@treenx/mods', type: 'module' }),
+  );
   const names = ['tasks', 'ideal', 'row-layout', 'simple-components', 'three', 'cafe'];
   for (const name of names) {
     await mkdir(join(directory, name));
-    await writeFile(join(directory, name, 'kernel.ts'),
-      `export { default } from ${JSON.stringify(new URL(`../${name}/kernel.ts`, import.meta.url).href)};\n`);
+    await writeFile(
+      join(directory, name, 'kernel.ts'),
+      `export { default } from ${JSON.stringify(new URL(`../${name}/kernel.ts`, import.meta.url).href)};\n`,
+    );
   }
   const loaded = await loadLocalMods(directory, 'kernel');
   assert.deepEqual(loaded.failed, []);
   assert.deepEqual(loaded.loaded, [...names].sort());
   return loaded.manifests;
 })();
-const collected = composition.then(modules => {
-  const module = modules.find(module => module.id === '@treenx/mods/simple-components');
+const collected = composition.then((modules) => {
+  const module = modules.find((module) => module.id === '@treenx/mods/simple-components');
   assert.ok(module);
   return module;
 });
@@ -120,14 +125,22 @@ async function fixture(t: TestContext, grant = R | W) {
   assert.ok(adminCredential);
   const admin = await openSession(await runtime.instance.openSession(adminCredential), deliveries);
   const caller = await openSession(await runtime.instance.openSession(), deliveries);
-  const constructedHost = createNode(hostPath, 't.dir', {}, {
-    checklist: { $type: 'simple.checklist', items: [{ id: 1, text: 'Keep', done: false }] },
-    tags: { $type: 'simple.tags', items: ['keep'] },
-    estimate: { $type: 'simple.estimate', value: 2, unit: 'days' },
-    links: { $type: 'simple.links', items: [{ id: 1, url: 'https://keep.example', label: 'Keep' }] },
-    comments: { $type: 'simple.comments', items: [] },
-    timeTrack: { $type: 'simple.time-track', entries: [], running: false },
-  });
+  const constructedHost = createNode(
+    hostPath,
+    't.dir',
+    {},
+    {
+      checklist: { $type: 'simple.checklist', items: [{ id: 1, text: 'Keep', done: false }] },
+      tags: { $type: 'simple.tags', items: ['keep'] },
+      estimate: { $type: 'simple.estimate', value: 2, unit: 'days' },
+      links: {
+        $type: 'simple.links',
+        items: [{ id: 1, url: 'https://keep.example', label: 'Keep' }],
+      },
+      comments: { $type: 'simple.comments', items: [] },
+      timeTrack: { $type: 'simple.time-track', entries: [], running: false },
+    },
+  );
   const hostNode: NodeInput = {
     $path: constructedHost.$path,
     $type: constructedHost.$type,
@@ -170,7 +183,10 @@ async function fixture(t: TestContext, grant = R | W) {
       account: '/admin',
       password: config.firstAdmin.password,
     });
-    const reopenedAdmin = await openSession(await runtime.instance.openSession(credential), deliveries);
+    const reopenedAdmin = await openSession(
+      await runtime.instance.openSession(credential),
+      deliveries,
+    );
     return { runtime, admin: reopenedAdmin };
   }
 
@@ -189,14 +205,17 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
       timeTrackSchema,
       descriptionSchema,
     ];
-    assert.deepEqual(module.types.map(type => type.name).sort(), expectedSchemas.map(schema => schema.$id).sort());
+    assert.deepEqual(
+      module.types.map((type) => type.name).sort(),
+      expectedSchemas.map((schema) => schema.$id).sort(),
+    );
 
-    const checklist = module.types.find(type => type.name === 'simple.checklist');
-    const comments = module.types.find(type => type.name === 'simple.comments');
-    const estimate = module.types.find(type => type.name === 'simple.estimate');
-    const links = module.types.find(type => type.name === 'simple.links');
-    const tags = module.types.find(type => type.name === 'simple.tags');
-    const timeTrack = module.types.find(type => type.name === 'simple.time-track');
+    const checklist = module.types.find((type) => type.name === 'simple.checklist');
+    const comments = module.types.find((type) => type.name === 'simple.comments');
+    const estimate = module.types.find((type) => type.name === 'simple.estimate');
+    const links = module.types.find((type) => type.name === 'simple.links');
+    const tags = module.types.find((type) => type.name === 'simple.tags');
+    const timeTrack = module.types.find((type) => type.name === 'simple.time-track');
     assert.ok(checklist && comments && estimate && links && tags && timeTrack);
     assert.deepEqual(Object.keys(checklist.actions).sort(), ['add', 'remove', 'toggle']);
     assert.deepEqual(Object.keys(comments.actions), ['add']);
@@ -224,7 +243,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
         { id: 2, text: 'New task', done: false },
       ],
     });
-    for (const key of componentKeys.filter(key => key !== '#checklist')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#checklist'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#checklist', 'toggle', { id: 2 });
@@ -237,7 +257,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
         { id: 2, text: 'New task', done: true },
       ],
     });
-    for (const key of componentKeys.filter(key => key !== '#checklist')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#checklist'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#checklist', 'remove', { id: 1 });
@@ -247,7 +268,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
       $v: 0,
       items: [{ id: 2, text: 'New task', done: true }],
     });
-    for (const key of componentKeys.filter(key => key !== '#checklist')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#checklist'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#tags', 'add', { tag: '  urgent  ' });
@@ -256,14 +278,21 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
     await f.invoke('#tags', 'remove', { tag: 'absent' });
     next = await readNode(f.caller.session, hostPath);
     assert.deepEqual(next['#tags'], { $type: 'simple.tags', $v: 0, items: ['urgent'] });
-    for (const key of componentKeys.filter(key => key !== '#tags')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#tags'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#estimate', 'update', { value: 5, unit: 'points' });
     await f.invoke('#estimate', 'update', { value: 6 });
     next = await readNode(f.caller.session, hostPath);
-    assert.deepEqual(next['#estimate'], { $type: 'simple.estimate', $v: 0, value: 6, unit: 'points' });
-    for (const key of componentKeys.filter(key => key !== '#estimate')) assert.deepEqual(next[key], node[key]);
+    assert.deepEqual(next['#estimate'], {
+      $type: 'simple.estimate',
+      $v: 0,
+      value: 6,
+      unit: 'points',
+    });
+    for (const key of componentKeys.filter((key) => key !== '#estimate'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#links', 'add', { url: '  https://new.example  ', label: '  New  ' });
@@ -274,7 +303,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
       $v: 0,
       items: [{ id: 2, url: 'https://new.example', label: 'New' }],
     });
-    for (const key of componentKeys.filter(key => key !== '#links')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#links'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     const commentBefore = Date.now();
@@ -284,7 +314,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
     assert.equal(comment.author, 'Ada');
     assert.equal(comment.text, 'Completed');
     assert.ok(typeof comment.createdAt === 'number' && comment.createdAt >= commentBefore);
-    for (const key of componentKeys.filter(key => key !== '#comments')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#comments'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     const timerBefore = Date.now();
@@ -296,7 +327,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
     const started = firstRecord(running.entries);
     assert.ok(typeof started.start === 'number' && started.start >= timerBefore);
     assert.equal(started.end, 0);
-    for (const key of componentKeys.filter(key => key !== '#timeTrack')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#timeTrack'))
+      assert.deepEqual(next[key], node[key]);
     node = next;
 
     await f.invoke('#timeTrack', 'stop', {});
@@ -307,7 +339,8 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
     const stoppedEntry = firstRecord(stopped.entries);
     assert.ok(typeof stoppedEntry.end === 'number' && typeof stoppedEntry.start === 'number');
     assert.ok(stoppedEntry.end >= stoppedEntry.start);
-    for (const key of componentKeys.filter(key => key !== '#timeTrack')) assert.deepEqual(next[key], node[key]);
+    for (const key of componentKeys.filter((key) => key !== '#timeTrack'))
+      assert.deepEqual(next[key], node[key]);
   });
 
   it('validates action inputs and domain transitions at the caller boundary', async (t) => {
@@ -355,8 +388,10 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
     assert.deepEqual(second['#comments'], first['#comments']);
     assert.equal(secondComment.createdAt, firstComment.createdAt);
 
-    const journal = (await f.runtime.store.scan({ range: { journal: hostPath }, budget: scanBudget() })).items;
-    const decisions = journal.filter(commit => commit.decision?.opId.nonce === opId.nonce);
+    const journal = (
+      await f.runtime.store.scan({ range: { journal: hostPath }, budget: scanBudget() })
+    ).items;
+    const decisions = journal.filter((commit) => commit.decision?.opId.nonce === opId.nonce);
     assert.equal(decisions.length, 1);
     assert.equal(decisions[0].kind, 'commit');
     assert.equal(decisions[0].caller, f.caller.session.actor.principal);

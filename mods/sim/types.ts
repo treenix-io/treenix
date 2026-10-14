@@ -3,8 +3,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // AgentSim shared types — used by both service (backend) and view (frontend)
 // Classes per CLAUDE.md: "Exception: for entity definition could be used"
 
-
-
 /** Agent 2D map position and interaction radius */
 export class SimPosition {
   x = 0;
@@ -99,16 +97,22 @@ const declaredSimWorld = declareClientType('sim.world', SimWorld);
 const declaredSimAgent = declareClientType('sim.agent', SimAgent);
 const declaredSimItem = declareClientType('sim.item', SimItem);
 
-export const clientModules = [declareOpenModule('@treenx/mods/sim/types', [], [
-  declaredSimPosition,
-  declaredSimDescriptive,
-  declaredSimMemory,
-  declaredSimConfig,
-  declaredSimRound,
-  declaredSimEvents,
-  declaredSimAi,
-  declaredSimNearby,
-  declaredSimWorld,
-  declaredSimAgent,
-  declaredSimItem,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/sim/types',
+    [],
+    [
+      declaredSimPosition,
+      declaredSimDescriptive,
+      declaredSimMemory,
+      declaredSimConfig,
+      declaredSimRound,
+      declaredSimEvents,
+      declaredSimAi,
+      declaredSimNearby,
+      declaredSimWorld,
+      declaredSimAgent,
+      declaredSimItem,
+    ],
+  ),
+];

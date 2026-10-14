@@ -29,28 +29,40 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
 
   useEffect(() => {
     let alive = true;
-    actions.diff()
+    actions
+      .diff()
       // decode at the execute() boundary — Actions<T> returns Promise<unknown>
-      .then(r => { if (alive) setEntries((r as { entries: DiffEntry[] }).entries); })
-      .catch(e => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { alive = false; };
+      .then((r) => {
+        if (alive) setEntries((r as { entries: DiffEntry[] }).entries);
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
   }, [actions, value.status]);
 
   const run = (fn: () => Promise<unknown>) => () => {
     setError('');
-    fn().catch(e => setError(e instanceof Error ? e.message : String(e)));
+    fn().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  const canWork = value.status === 'open' || value.status === 'review' || value.status === 'conflict';
+  const canWork =
+    value.status === 'open' || value.status === 'review' || value.status === 'conflict';
 
   return (
     <div className="max-w-2xl space-y-3 p-4">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">{value.title || ctx?.path}</h2>
-        <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[value.status] ?? ''}`}>
+        <span
+          className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[value.status] ?? ''}`}
+        >
           {value.status}
         </span>
-        <span className="text-xs text-muted-foreground">owner: {value.owner} · base: {value.base}</span>
+        <span className="text-xs text-muted-foreground">
+          owner: {value.owner} · base: {value.base}
+        </span>
       </div>
 
       {error && <div className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -58,7 +70,7 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
       {value.conflicts.length > 0 && (
         <div className="rounded border border-red-200 bg-red-50 p-3 text-sm">
           <div className="mb-1 font-medium text-red-800">Conflicts</div>
-          {value.conflicts.map(c => (
+          {value.conflicts.map((c) => (
             <div key={c.path} className="font-mono text-xs text-red-700">
               {c.path} — expected rev {String(c.expectedRev)}, live is {String(c.actualRev)}
             </div>
@@ -68,9 +80,11 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
 
       <div className="rounded border">
         <div className="border-b px-3 py-1.5 text-xs font-medium text-muted-foreground">
-          {entries === null ? 'loading diff…' : `${entries.length} change${entries.length === 1 ? '' : 's'}`}
+          {entries === null
+            ? 'loading diff…'
+            : `${entries.length} change${entries.length === 1 ? '' : 's'}`}
         </div>
-        {entries?.map(e => (
+        {entries?.map((e) => (
           <div key={e.path} className="flex items-baseline gap-2 px-3 py-1 font-mono text-xs">
             <span className={`w-3 font-bold ${OP_STYLE[e.op]}`}>{OP_SIGN[e.op]}</span>
             <span className={OP_STYLE[e.op]}>{e.path}</span>
@@ -91,18 +105,21 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
           </Button>
         )}
         {canWork && (
-          <Button size="sm" onClick={run(() => actions.merge())}>Merge</Button>
+          <Button size="sm" onClick={run(() => actions.merge())}>
+            Merge
+          </Button>
         )}
         {value.status !== 'merged' && value.status !== 'abandoned' && (
-          <Button size="sm" variant="ghost" onClick={run(() => actions.abandon())}>Abandon</Button>
+          <Button size="sm" variant="ghost" onClick={run(() => actions.abandon())}>
+            Abandon
+          </Button>
         )}
       </div>
     </div>
   );
 };
 
-export const clientModules = [...declaredOwner0,
-  declareClientModule('@treenx/mods/branch/view', [
-    declareView(Branch, 'react', BranchView)
-  ])
+export const clientModules = [
+  ...declaredOwner0,
+  declareClientModule('@treenx/mods/branch/view', [declareView(Branch, 'react', BranchView)]),
 ];

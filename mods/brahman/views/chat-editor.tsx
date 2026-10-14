@@ -4,38 +4,56 @@ import type { PresentationNode } from '@treenx/react';
 // Same visual as PageChatPreview but with inline editing
 
 import {
-closestCenter,
-DndContext,
-type DragEndEvent,
-KeyboardSensor,
-PointerSensor,
-useSensor,
-useSensors,
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
 } from '@dnd-kit/core';
 import {
-arrayMove,
-SortableContext,
-sortableKeyboardCoordinates,
-useSortable,
-verticalListSortingStrategy,
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@treenx/react/components/ui/button';
 import { Checkbox } from '@treenx/react/components/ui/checkbox';
-import { Dialog,DialogContent,DialogFooter,DialogHeader,DialogTitle } from '@treenx/react/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@treenx/react/components/ui/dialog';
 import { Input } from '@treenx/react/components/ui/input';
-import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/components/ui/select';
-import { useTreeEffects,useSave,type View,useChildren,usePath } from '@treenx/react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@treenx/react/components/ui/select';
+import { useTreeEffects, useSave, type View, useChildren, usePath } from '@treenx/react';
 import { sanitizeHref } from '@treenx/react';
-import { Camera,File,GripVertical,Mic,MoreHorizontal,Plus,Trash2,Video } from 'lucide-react';
-import { useCallback,useEffect,useRef,useState } from 'react';
-import { ACTION_TYPES,MENU_TYPES,type MenuButton,type MenuRow,type MenuType,type PageConfig,type TString } from '../types';
-import { actionIcon,actionSummary } from './action-cards';
-import { TStringLineInput,tstringPreview } from './tstring-input';
+import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ACTION_TYPES,
+  MENU_TYPES,
+  type MenuButton,
+  type MenuRow,
+  type MenuType,
+  type PageConfig,
+  type TString,
+} from '../types';
+import { actionIcon, actionSummary } from './action-cards';
+import { TStringLineInput, tstringPreview } from './tstring-input';
 
 // ── Helpers ──
-
-
 
 function primaryLang(ts: TString | undefined): string {
   if (!ts) return 'ru';
@@ -44,17 +62,25 @@ function primaryLang(ts: TString | undefined): string {
   return Object.keys(ts)[0] ?? 'ru';
 }
 
-
-
-
-
-
-
-
 // ── Editable text — click to edit, blur to save ──
 
 // Sanitize browser-generated HTML back to Telegram-safe subset
-const ALLOWED_TAGS = new Set(['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'a', 'blockquote', 'br']);
+const ALLOWED_TAGS = new Set([
+  'b',
+  'strong',
+  'i',
+  'em',
+  'u',
+  'ins',
+  's',
+  'strike',
+  'del',
+  'code',
+  'pre',
+  'a',
+  'blockquote',
+  'br',
+]);
 
 function sanitizeHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -121,7 +147,15 @@ function EditableText({
 // ── Bubble shells ──
 // NOTE: These use hardcoded Telegram dark-theme colors intentionally to emulate the TG chat UI
 
-function BotBubble({ children, first, tools }: { children: React.ReactNode; first?: boolean; tools?: React.ReactNode }) {
+function BotBubble({
+  children,
+  first,
+  tools,
+}: {
+  children: React.ReactNode;
+  first?: boolean;
+  tools?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col items-start max-w-[85%] group/bubble">
       {first && <span className="text-[11px] font-semibold text-[#5b9bd5] mb-0.5 ml-1">Bot</span>}
@@ -140,8 +174,10 @@ function BotBubble({ children, first, tools }: { children: React.ReactNode; firs
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-end">
-      <div className="bg-[#2b5278] text-[#e1e3e6] text-sm rounded-lg rounded-tr-sm px-3 py-2 max-w-[70%]
-        border border-dashed border-[#3d6a99] opacity-60">
+      <div
+        className="bg-[#2b5278] text-[#e1e3e6] text-sm rounded-lg rounded-tr-sm px-3 py-2 max-w-[70%]
+        border border-dashed border-[#3d6a99] opacity-60"
+      >
         {children}
       </div>
     </div>
@@ -179,11 +215,16 @@ function SettingsDialog({
   const type = node.$type;
 
   return (
-    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-xs">
         <DialogHeader>
           <DialogTitle className="text-sm">
-            {ACTION_TYPES.find(a => a.type === type)?.label ?? type.split('.').at(-1)}
+            {ACTION_TYPES.find((a) => a.type === type)?.label ?? type.split('.').at(-1)}
           </DialogTitle>
         </DialogHeader>
 
@@ -191,32 +232,54 @@ function SettingsDialog({
           {/* Type-specific settings */}
           {type === 'brahman.action.message' && (
             <>
-              <SettingSelect label="Menu" value={(node.menuType as string) ?? 'none'}
-                options={MENU_TYPES.map(m => ({ value: m.value, label: m.label }))}
-                onChange={v => onUpdate({ menuType: v })} />
-              <SettingCheckbox label="Disable links" checked={!!node.disableLinks}
-                onChange={v => onUpdate({ disableLinks: v })} />
+              <SettingSelect
+                label="Menu"
+                value={(node.menuType as string) ?? 'none'}
+                options={MENU_TYPES.map((m) => ({ value: m.value, label: m.label }))}
+                onChange={(v) => onUpdate({ menuType: v })}
+              />
+              <SettingCheckbox
+                label="Disable links"
+                checked={!!node.disableLinks}
+                onChange={(v) => onUpdate({ disableLinks: v })}
+              />
             </>
           )}
 
           {type === 'brahman.action.question' && (
             <>
-              <SettingSelect label="Input type" value={(node.inputType as string) ?? 'text'}
-                options={[{ value: 'text', label: 'Text' }, { value: 'photo', label: 'Photo' }]}
-                onChange={v => onUpdate({ inputType: v })} />
-              <SettingInput label="Save to" value={(node.saveTo as string) ?? ''}
-                placeholder="session.field" onChange={v => onUpdate({ saveTo: v })} />
+              <SettingSelect
+                label="Input type"
+                value={(node.inputType as string) ?? 'text'}
+                options={[
+                  { value: 'text', label: 'Text' },
+                  { value: 'photo', label: 'Photo' },
+                ]}
+                onChange={(v) => onUpdate({ inputType: v })}
+              />
+              <SettingInput
+                label="Save to"
+                value={(node.saveTo as string) ?? ''}
+                placeholder="session.field"
+                onChange={(v) => onUpdate({ saveTo: v })}
+              />
             </>
           )}
 
           {type === 'brahman.action.file' && (
-            <SettingSelect label="Send as" value={(node.asType as string) ?? ''}
+            <SettingSelect
+              label="Send as"
+              value={(node.asType as string) ?? ''}
               options={[
-                { value: '', label: 'Auto' }, { value: 'photo', label: 'Photo' },
-                { value: 'document', label: 'Document' }, { value: 'video', label: 'Video' },
-                { value: 'audio', label: 'Audio' }, { value: 'voice', label: 'Voice' },
+                { value: '', label: 'Auto' },
+                { value: 'photo', label: 'Photo' },
+                { value: 'document', label: 'Document' },
+                { value: 'video', label: 'Video' },
+                { value: 'audio', label: 'Audio' },
+                { value: 'voice', label: 'Voice' },
               ]}
-              onChange={v => onUpdate({ asType: v })} />
+              onChange={(v) => onUpdate({ asType: v })}
+            />
           )}
 
           <div className="pt-1 border-t border-border">
@@ -235,8 +298,16 @@ function SettingsDialog({
   );
 }
 
-function SettingSelect({ label, value, options, onChange }: {
-  label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void;
+function SettingSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
@@ -246,33 +317,53 @@ function SettingSelect({ label, value, options, onChange }: {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>
   );
 }
 
-function SettingCheckbox({ label, checked, onChange }: {
-  label: string; checked: boolean; onChange: (v: boolean) => void;
+function SettingCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
 }) {
   return (
     <label className="flex items-center justify-between gap-2 cursor-pointer">
       <span className="text-[11px] text-muted-foreground">{label}</span>
-      <Checkbox checked={checked} onChange={e => onChange(e.target.checked)} />
+      <Checkbox checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
   );
 }
 
-function SettingInput({ label, value, placeholder, onChange }: {
-  label: string; value: string; placeholder?: string; onChange: (v: string) => void;
+function SettingInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-[11px] text-muted-foreground shrink-0">{label}</span>
       <Input
         className="w-32 h-7 text-xs font-mono"
-        value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
       />
     </div>
   );
@@ -298,7 +389,7 @@ function EditableButtons({
   for (const row of rows) for (const btn of row.buttons) if (btn.id >= nextId) nextId = btn.id + 1;
 
   function addButton(ri: number) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[ri].buttons.push({ id: nextId, title: { ru: '', en: '' }, tags: [] });
     onChangeRows(newRows);
   }
@@ -308,15 +399,15 @@ function EditableButtons({
   }
 
   function updateButton(ri: number, bi: number, btn: MenuButton) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[ri].buttons[bi] = btn;
     onChangeRows(newRows);
   }
 
   function deleteButton(ri: number, bi: number) {
-    const newRows = rows.map(r => ({ buttons: [...r.buttons] }));
+    const newRows = rows.map((r) => ({ buttons: [...r.buttons] }));
     newRows[ri].buttons.splice(bi, 1);
-    onChangeRows(newRows.filter(r => r.buttons.length > 0));
+    onChangeRows(newRows.filter((r) => r.buttons.length > 0));
     setEditBtn(null);
   }
 
@@ -331,9 +422,10 @@ function EditableButtons({
                 key={btn.id}
                 className={`flex-1 text-center text-xs py-1.5 px-2 rounded truncate cursor-pointer
                   hover:ring-1 hover:ring-[#5b9bd5] transition-all
-                  ${isReply
-                    ? 'bg-[#1c2733] text-[#e1e3e6] border border-[#2b3945]'
-                    : 'bg-[#2b5278] text-[#e1e3e6]'
+                  ${
+                    isReply
+                      ? 'bg-[#1c2733] text-[#e1e3e6] border border-[#2b3945]'
+                      : 'bg-[#2b5278] text-[#e1e3e6]'
                   }`}
                 onClick={() => setEditBtn({ ri, bi })}
               >
@@ -363,7 +455,7 @@ function EditableButtons({
       {editBtn && rows[editBtn.ri]?.buttons[editBtn.bi] && (
         <ButtonEditDialog
           button={rows[editBtn.ri].buttons[editBtn.bi]}
-          onSave={btn => updateButton(editBtn.ri, editBtn.bi, btn)}
+          onSave={(btn) => updateButton(editBtn.ri, editBtn.bi, btn)}
           onDelete={() => deleteButton(editBtn.ri, editBtn.bi)}
           onClose={() => setEditBtn(null)}
         />
@@ -386,7 +478,12 @@ function ButtonEditDialog({
   const [draft, setDraft] = useState(() => ({ ...button }));
 
   return (
-    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-xs">
         <DialogHeader>
           <DialogTitle className="text-sm">Edit button</DialogTitle>
@@ -397,7 +494,7 @@ function ButtonEditDialog({
             <span className="text-[11px] text-muted-foreground">Title</span>
             <TStringLineInput
               value={draft.title}
-              onChange={title => setDraft(d => ({ ...d, title }))}
+              onChange={(title) => setDraft((d) => ({ ...d, title }))}
               langs={['ru', 'en']}
             />
           </div>
@@ -408,19 +505,33 @@ function ButtonEditDialog({
               className="flex-1 h-7 text-xs"
               placeholder="https://..."
               value={draft.url ?? ''}
-              onChange={e => setDraft(d => ({ ...d, url: e.target.value || undefined }))}
+              onChange={(e) => setDraft((d) => ({ ...d, url: e.target.value || undefined }))}
             />
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={onDelete}
-            className="text-destructive hover:text-destructive text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            className="text-destructive hover:text-destructive text-xs"
+          >
             <Trash2 className="h-3 w-3 mr-1" /> Delete
           </Button>
           <div className="flex gap-1">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={() => { onSave(draft); onClose(); }}>Save</Button>
+            <Button variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onSave(draft);
+                onClose();
+              }}
+            >
+              Save
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -440,7 +551,9 @@ function SortableAction({
   onDelete: () => void;
 }) {
   const { patchNode } = useTreeEffects();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.$path });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: node.$path,
+  });
   const { data: n } = usePath(node.$path);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -460,7 +573,10 @@ function SortableAction({
   const settingsBtn = (
     <button
       type="button"
-      onClick={e => { e.stopPropagation(); setShowSettings(true); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowSettings(true);
+      }}
       className="bg-[#1c2733] border border-[#2b3945] rounded-full p-1 text-[#6c7883] hover:text-[#e1e3e6] transition-colors"
     >
       <MoreHorizontal className="h-3 w-3" />
@@ -490,14 +606,14 @@ function SortableAction({
             <BotBubble first={isFirstBubble} tools={settingsBtn}>
               <EditableText
                 value={(n.text as TString) ?? {}}
-                onChange={text => update({ text })}
+                onChange={(text) => update({ text })}
                 placeholder="Type message..."
               />
             </BotBubble>
             <EditableButtons
               rows={rows}
               menuType={menuType}
-              onChangeRows={rows => update({ rows })}
+              onChangeRows={(rows) => update({ rows })}
             />
           </div>
         );
@@ -510,15 +626,18 @@ function SortableAction({
             <BotBubble first={isFirstBubble} tools={settingsBtn}>
               <EditableText
                 value={(n.text as TString) ?? {}}
-                onChange={text => update({ text })}
+                onChange={(text) => update({ text })}
                 placeholder="Type question..."
               />
             </BotBubble>
             <UserBubble>
-              {inputType === 'photo'
-                ? <span className="flex items-center gap-1"><Camera className="h-3.5 w-3.5" /> Photo</span>
-                : <span className="italic text-xs">User types answer...</span>
-              }
+              {inputType === 'photo' ? (
+                <span className="flex items-center gap-1">
+                  <Camera className="h-3.5 w-3.5" /> Photo
+                </span>
+              ) : (
+                <span className="italic text-xs">User types answer...</span>
+              )}
             </UserBubble>
           </div>
         );
@@ -548,13 +667,17 @@ function SortableAction({
             <BotBubble first={isFirstBubble} tools={settingsBtn}>
               <EditableText
                 value={(n.text as TString) ?? {}}
-                onChange={text => update({ text })}
+                onChange={(text) => update({ text })}
                 placeholder="Choose language"
               />
             </BotBubble>
             <div className="flex gap-0.5 max-w-[85%]">
-              <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">🇷🇺 RU</div>
-              <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">🇬🇧 EN</div>
+              <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">
+                🇷🇺 RU
+              </div>
+              <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">
+                🇬🇧 EN
+              </div>
             </div>
           </div>
         );
@@ -567,7 +690,10 @@ function SortableAction({
         return (
           <SystemPill onClick={() => setShowSettings(true)}>
             {actionIcon(type)}
-            <span>{label}{summary ? `: ${summary}` : ''}</span>
+            <span>
+              {label}
+              {summary ? `: ${summary}` : ''}
+            </span>
           </SystemPill>
         );
       }
@@ -608,14 +734,19 @@ function ChatActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
         </button>
 
         {open && (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-50 w-52
-            bg-popover border border-border rounded-lg shadow-xl py-1 max-h-64 overflow-y-auto">
-            {ACTION_TYPES.map(at => (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-50 w-52
+            bg-popover border border-border rounded-lg shadow-xl py-1 max-h-64 overflow-y-auto"
+          >
+            {ACTION_TYPES.map((at) => (
               <button
                 key={at.type}
                 type="button"
                 className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
-                onClick={() => { onSelect(at.type); setOpen(false); }}
+                onClick={() => {
+                  onSelect(at.type);
+                  setOpen(false);
+                }}
               >
                 {actionIcon(at.type)}
                 {at.label}
@@ -638,20 +769,27 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
   const positions = value.positions;
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
-    ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
+    ...positions
+      .map((p) => children.find((c) => c.$path === p))
+      .filter((c): c is PresentationNode => !!c),
+    ...children.filter((c) => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 
   // ── Command editing ──
   const command = value.command;
   const [localCmd, setLocalCmd] = useState(command);
-  useEffect(() => { setLocalCmd(command); }, [command]);
+  useEffect(() => {
+    setLocalCmd(command);
+  }, [command]);
 
   const node = ctx!.node;
   const save = useSave(node.$path, { autoSave: true, delay: 400 });
-  const saveNode = useCallback((patch: Record<string, unknown>) => {
-    save.onChange(patch);
-  }, [save.onChange]);
+  const saveNode = useCallback(
+    (patch: Record<string, unknown>) => {
+      save.onChange(patch);
+    },
+    [save.onChange],
+  );
 
   // ── DnD ──
   const sensors = useSensors(
@@ -662,10 +800,16 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = sorted.findIndex(c => c.$path === active.id);
-    const newIndex = sorted.findIndex(c => c.$path === over.id);
+    const oldIndex = sorted.findIndex((c) => c.$path === active.id);
+    const newIndex = sorted.findIndex((c) => c.$path === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
-    saveNode({ positions: arrayMove(sorted.map(c => c.$path), oldIndex, newIndex) });
+    saveNode({
+      positions: arrayMove(
+        sorted.map((c) => c.$path),
+        oldIndex,
+        newIndex,
+      ),
+    });
   }
 
   // ── CRUD ──
@@ -679,7 +823,7 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
 
   async function removeAction(path: string) {
     await removeNode(path);
-    saveNode({ positions: positions.filter(p => p !== path) });
+    saveNode({ positions: positions.filter((p) => p !== path) });
   }
 
   let hadBotBubble = false;
@@ -693,7 +837,7 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
             text-center border-none outline-none focus:ring-1 focus:ring-[#3d6a99] w-32"
           placeholder="/command..."
           value={localCmd}
-          onChange={e => {
+          onChange={(e) => {
             setLocalCmd(e.target.value);
             saveNode({ command: e.target.value });
           }}
@@ -705,15 +849,19 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
 
       {/* Actions with DnD */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={sorted.map(c => c.$path)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={sorted.map((c) => c.$path)} strategy={verticalListSortingStrategy}>
           <div className="space-y-2.5">
             {sorted.length === 0 && (
               <div className="text-[#6c7883] text-xs text-center py-8">Click + to add actions</div>
             )}
 
-            {sorted.map(child => {
-              const isBubbleType = ['brahman.action.message', 'brahman.action.question',
-                'brahman.action.file', 'brahman.action.selectlang'].includes(child.$type);
+            {sorted.map((child) => {
+              const isBubbleType = [
+                'brahman.action.message',
+                'brahman.action.question',
+                'brahman.action.file',
+                'brahman.action.selectlang',
+              ].includes(child.$type);
               const isFirstBubble = isBubbleType && !hadBotBubble;
               if (isBubbleType) hadBotBubble = true;
 
@@ -741,4 +889,4 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
       </div>
     </div>
   );
-}
+};

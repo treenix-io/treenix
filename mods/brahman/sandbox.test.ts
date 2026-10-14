@@ -32,13 +32,18 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
   it('the deadline counts CPU from its first poll: earlier work and descheduled time are not charged', () => {
     const burn = (ms: number) => {
       const until = process.threadCpuUsage();
-      const spent = () => { const d = process.threadCpuUsage(until); return (d.user + d.system) / 1000; };
-      while (spent() < ms) { /* spin */ }
+      const spent = () => {
+        const d = process.threadCpuUsage(until);
+        return (d.user + d.system) / 1000;
+      };
+      while (spent() < ms) {
+        /* spin */
+      }
     };
     const expired = cpuDeadline(20);
 
     burn(30);
-    assert.equal(expired(), false, 'CPU spent before the first poll is not the expression\'s');
+    assert.equal(expired(), false, "CPU spent before the first poll is not the expression's");
 
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     assert.equal(expired(), false, 'a descheduled thread spends no budget');
@@ -74,7 +79,10 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
 
     const { user, system } = process.threadCpuUsage(before);
     const spentMs = (user + system) / 1000;
-    assert.ok(spentMs >= 50 && spentMs < 1000, `the loop ran to the deadline and no further: ${spentMs}ms of CPU`);
+    assert.ok(
+      spentMs >= 50 && spentMs < 1000,
+      `the loop ran to the deadline and no further: ${spentMs}ms of CPU`,
+    );
   });
 
   it('rejects empty / whitespace expression', async () => {
@@ -91,7 +99,10 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
     Reflect.deleteProperty(process, 'threadCpuUsage');
     try {
       // A fresh module instance: the query makes the loader evaluate the file again.
-      await assert.rejects(import(new URL('./sandbox.ts?without-thread-cpu', import.meta.url).href), Error);
+      await assert.rejects(
+        import(new URL('./sandbox.ts?without-thread-cpu', import.meta.url).href),
+        Error,
+      );
     } finally {
       process.threadCpuUsage = threadCpuUsage;
     }

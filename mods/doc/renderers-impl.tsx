@@ -59,23 +59,28 @@ export function DocPageView({ value, onChange }: BlockProps) {
     [makeHref],
   );
 
-  const editorOptions = useMemo(() => ({
-    extensions,
-    content: sanitizeTiptap(value.content as TiptapNode),
-    editable,
-    onUpdate: ({ editor }: { editor: Editor }) => {
-      if (suppressRef.current) return;
-      dirtyRef.current = true;
-      const json = editor.getJSON();
-      contentRef.current = json;
-      onChange?.({ content: json });
-    },
-  }), [editable, extensions]);
+  const editorOptions = useMemo(
+    () => ({
+      extensions,
+      content: sanitizeTiptap(value.content as TiptapNode),
+      editable,
+      onUpdate: ({ editor }: { editor: Editor }) => {
+        if (suppressRef.current) return;
+        dirtyRef.current = true;
+        const json = editor.getJSON();
+        contentRef.current = json;
+        onChange?.({ content: json });
+      },
+    }),
+    [editable, extensions],
+  );
 
   const editor = useEditor(editorOptions);
 
   // Reset dirty flag on navigation (path change) so sync accepts new doc content
-  useEffect(() => { dirtyRef.current = false; }, [value.$path]);
+  useEffect(() => {
+    dirtyRef.current = false;
+  }, [value.$path]);
 
   // Sync editor content from tree subscription.
   // Skip when dirty (local edits not yet confirmed by server) to prevent
@@ -136,7 +141,9 @@ export function DocPageView({ value, onChange }: BlockProps) {
             className="w-full text-2xl font-semibold tracking-tight bg-transparent border-none shadow-none outline-none text-foreground placeholder:text-muted-foreground/50 p-0 m-0 leading-tight [font-family:inherit]"
           />
         ) : (
-          value.title && <h1 className="text-2xl font-semibold tracking-tight text-foreground">{value.title}</h1>
+          value.title && (
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{value.title}</h1>
+          )
         )}
       </div>
 
@@ -153,10 +160,14 @@ export function DocPageView({ value, onChange }: BlockProps) {
           if (!path) return;
           e.preventDefault();
           e.stopPropagation();
-          editor.chain().focus().insertContent({
-            type: 'treenixBlock',
-            attrs: { ref: path, type: null, props: {} },
-          }).run();
+          editor
+            .chain()
+            .focus()
+            .insertContent({
+              type: 'treenixBlock',
+              attrs: { ref: path, type: null, props: {} },
+            })
+            .run();
         }}
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('application/treenix-path')) {

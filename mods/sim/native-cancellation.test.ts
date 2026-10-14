@@ -174,8 +174,7 @@ it(
     const autostart = await instantiateModule(
       {
         collectionId: '@treenx/core/autostart',
-        factory: async () =>
-          (await import('../../core/src/mods/autostart/kernel')).default(),
+        factory: async () => (await import('../../core/src/mods/autostart/kernel')).default(),
       },
       {},
     );
@@ -187,9 +186,7 @@ it(
     });
     t.after(() => test.close());
     assert.ok(test.instance.setupCredential);
-    const admin = await test.instance.openSession(
-      test.instance.setupCredential,
-    );
+    const admin = await test.instance.openSession(test.instance.setupCredential);
     const delivery = drainSession(admin);
     t.after(async () => {
       admin.close();
@@ -208,9 +205,7 @@ it(
         ...prefab,
         source: {
           ...prefab.source,
-          nodes: prefab.source.nodes.filter(
-            (node) => node.$path !== '/sys/autostart/sim',
-          ),
+          nodes: prefab.source.nodes.filter((node) => node.$path !== '/sys/autostart/sim'),
         },
       })),
     };
@@ -230,10 +225,7 @@ it(
     const owner = await test.instance.openNodeSession('/sim/service');
     const service = sim.manifest.security[0];
     assert.ok(service.context === 'service');
-    const run = await service.handler(
-      await readNode(admin, '/sim/service'),
-      owner,
-    );
+    const run = await service.handler(await readNode(admin, '/sim/service'), owner);
     t.after(async () => {
       owner.close();
       await run.stop();
@@ -261,10 +253,7 @@ it(
     );
     assert.equal(after.$rev, before.$rev);
     assert.equal(agentAfter.$rev, agentBefore.$rev);
-    assert.deepEqual(
-      part(agentAfter, SimPosition),
-      part(agentBefore, SimPosition),
-    );
+    assert.deepEqual(part(agentAfter, SimPosition), part(agentBefore, SimPosition));
     assert.deepEqual(part(after, SimRound).log, part(before, SimRound).log);
   },
 );

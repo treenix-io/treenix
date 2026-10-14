@@ -1,26 +1,26 @@
 // Three.js scene view — renders Treenix node tree as a 3D scene graph
 // SceneView registered for t3d.scene in "react" context
 
-import { Billboard,OrbitControls,Text,Trail } from '@react-three/drei';
-import { Canvas,useFrame } from '@react-three/fiber';
+import { Billboard, OrbitControls, Text, Trail } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { getComponent } from '@treenx/core';
 import { useResolvedNode } from '@treenx/react/bind/hook';
 import { useTreeSource } from '@treenx/react/tree/tree-source-context';
 import { type View } from '@treenx/react';
-import { useTreeEffects,useChildren,usePath } from '@treenx/react';
-import { useEffect,useMemo,useRef,useState } from 'react';
+import { useTreeEffects, useChildren, usePath } from '@treenx/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-T3dLight,
-T3dLine,
-T3dMaterial,
-T3dMesh,
-T3dObject,
-T3dParticles,
-T3dScene,
-T3dScript,
-T3dText,
-T3dTrail
+  T3dLight,
+  T3dLine,
+  T3dMaterial,
+  T3dMesh,
+  T3dObject,
+  T3dParticles,
+  T3dScene,
+  T3dScript,
+  T3dText,
+  T3dTrail,
 } from './types';
 
 // --- Texture loader helper ---
@@ -28,7 +28,10 @@ T3dTrail
 function useOptionalTexture(url: string | undefined): THREE.Texture | undefined {
   const [tex, setTex] = useState<THREE.Texture | undefined>();
   useEffect(() => {
-    if (!url) { setTex(undefined); return; }
+    if (!url) {
+      setTex(undefined);
+      return;
+    }
     new THREE.TextureLoader().load(url, setTex, undefined, () => setTex(undefined));
   }, [url]);
   return tex;
@@ -66,7 +69,11 @@ function Geometry({ mesh }: { mesh: T3dMesh }) {
 
 // --- Material ---
 
-const SIDE_MAP = { front: THREE.FrontSide, back: THREE.BackSide, double: THREE.DoubleSide } as const;
+const SIDE_MAP = {
+  front: THREE.FrontSide,
+  back: THREE.BackSide,
+  double: THREE.DoubleSide,
+} as const;
 
 function MaterialElement({ data }: { data: T3dMaterial }) {
   const map = useOptionalTexture(data.map || undefined);
@@ -80,30 +87,94 @@ function MaterialElement({ data }: { data: T3dMaterial }) {
 
   switch (data.kind) {
     case 'basic':
-      return <meshBasicMaterial color={data.color} map={map} wireframe={data.wireframe} transparent={data.transparent} opacity={data.opacity} side={side} />;
+      return (
+        <meshBasicMaterial
+          color={data.color}
+          map={map}
+          wireframe={data.wireframe}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
+        />
+      );
     case 'phong':
-      return <meshPhongMaterial color={data.color} emissive={data.emissive} map={map} normalMap={normalMap} wireframe={data.wireframe} flatShading={data.flatShading} transparent={data.transparent} opacity={data.opacity} side={side} />;
+      return (
+        <meshPhongMaterial
+          color={data.color}
+          emissive={data.emissive}
+          map={map}
+          normalMap={normalMap}
+          wireframe={data.wireframe}
+          flatShading={data.flatShading}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
+        />
+      );
     case 'toon':
-      return <meshToonMaterial color={data.color} map={map} wireframe={data.wireframe} transparent={data.transparent} opacity={data.opacity} side={side} />;
+      return (
+        <meshToonMaterial
+          color={data.color}
+          map={map}
+          wireframe={data.wireframe}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
+        />
+      );
     case 'lambert':
-      return <meshLambertMaterial color={data.color} emissive={data.emissive} map={map} wireframe={data.wireframe} transparent={data.transparent} opacity={data.opacity} side={side} />;
+      return (
+        <meshLambertMaterial
+          color={data.color}
+          emissive={data.emissive}
+          map={map}
+          wireframe={data.wireframe}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
+        />
+      );
     case 'physical':
       return (
         <meshPhysicalMaterial
-          color={data.color} emissive={data.emissive} emissiveIntensity={data.emissiveIntensity}
-          metalness={data.metalness} roughness={data.roughness}
-          map={map} normalMap={normalMap} roughnessMap={roughnessMap} metalnessMap={metalnessMap} emissiveMap={emissiveMap} aoMap={aoMap}
-          wireframe={data.wireframe} flatShading={data.flatShading} transparent={data.transparent} opacity={data.opacity} side={side}
+          color={data.color}
+          emissive={data.emissive}
+          emissiveIntensity={data.emissiveIntensity}
+          metalness={data.metalness}
+          roughness={data.roughness}
+          map={map}
+          normalMap={normalMap}
+          roughnessMap={roughnessMap}
+          metalnessMap={metalnessMap}
+          emissiveMap={emissiveMap}
+          aoMap={aoMap}
+          wireframe={data.wireframe}
+          flatShading={data.flatShading}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
           envMapIntensity={data.envMapIntensity}
         />
       );
     default: // standard
       return (
         <meshStandardMaterial
-          color={data.color} emissive={data.emissive} emissiveIntensity={data.emissiveIntensity}
-          metalness={data.metalness} roughness={data.roughness}
-          map={map} normalMap={normalMap} roughnessMap={roughnessMap} metalnessMap={metalnessMap} emissiveMap={emissiveMap} aoMap={aoMap}
-          wireframe={data.wireframe} flatShading={data.flatShading} transparent={data.transparent} opacity={data.opacity} side={side}
+          color={data.color}
+          emissive={data.emissive}
+          emissiveIntensity={data.emissiveIntensity}
+          metalness={data.metalness}
+          roughness={data.roughness}
+          map={map}
+          normalMap={normalMap}
+          roughnessMap={roughnessMap}
+          metalnessMap={metalnessMap}
+          emissiveMap={emissiveMap}
+          aoMap={aoMap}
+          wireframe={data.wireframe}
+          flatShading={data.flatShading}
+          transparent={data.transparent}
+          opacity={data.opacity}
+          side={side}
           envMapIntensity={data.envMapIntensity}
         />
       );
@@ -114,10 +185,11 @@ function MeshElement({ mesh, material }: { mesh: T3dMesh; material: T3dMaterial 
   return (
     <mesh castShadow={mesh.castShadow} receiveShadow={mesh.receiveShadow}>
       <Geometry mesh={mesh} />
-      {material
-        ? <MaterialElement data={material} />
-        : <meshStandardMaterial color="#6366f1" roughness={0.5} />
-      }
+      {material ? (
+        <MaterialElement data={material} />
+      ) : (
+        <meshStandardMaterial color="#6366f1" roughness={0.5} />
+      )}
     </mesh>
   );
 }
@@ -127,23 +199,54 @@ function MeshElement({ mesh, material }: { mesh: T3dMesh; material: T3dMaterial 
 function LightElement({ data }: { data: T3dLight }) {
   switch (data.kind) {
     case 'directional':
-      return <directionalLight color={data.color} intensity={data.intensity} castShadow={data.castShadow} />;
+      return (
+        <directionalLight
+          color={data.color}
+          intensity={data.intensity}
+          castShadow={data.castShadow}
+        />
+      );
     case 'spot':
       return (
         <spotLight
-          color={data.color} intensity={data.intensity}
-          angle={data.angle} penumbra={data.penumbra} distance={data.distance} decay={data.decay}
+          color={data.color}
+          intensity={data.intensity}
+          angle={data.angle}
+          penumbra={data.penumbra}
+          distance={data.distance}
+          decay={data.decay}
           castShadow={data.castShadow}
         />
       );
     case 'ambient':
       return <ambientLight color={data.color} intensity={data.intensity} />;
     case 'hemisphere':
-      return <hemisphereLight color={data.color} groundColor={data.groundColor} intensity={data.intensity} />;
+      return (
+        <hemisphereLight
+          color={data.color}
+          groundColor={data.groundColor}
+          intensity={data.intensity}
+        />
+      );
     case 'rect-area':
-      return <rectAreaLight color={data.color} intensity={data.intensity} width={data.rectWidth} height={data.rectHeight} />;
+      return (
+        <rectAreaLight
+          color={data.color}
+          intensity={data.intensity}
+          width={data.rectWidth}
+          height={data.rectHeight}
+        />
+      );
     default: // point
-      return <pointLight color={data.color} intensity={data.intensity} distance={data.distance} decay={data.decay} castShadow={data.castShadow} />;
+      return (
+        <pointLight
+          color={data.color}
+          intensity={data.intensity}
+          distance={data.distance}
+          decay={data.decay}
+          castShadow={data.castShadow}
+        />
+      );
   }
 }
 
@@ -184,20 +287,20 @@ function ParticlesElement({ data }: { data: T3dParticles }) {
     for (let i = 0; i < data.count; i++) {
       const i3 = i * 3;
       if (isVolume) {
-        pos[i3]     = (Math.random() - 0.5) * data.spread * 2;
+        pos[i3] = (Math.random() - 0.5) * data.spread * 2;
         pos[i3 + 1] = Math.random() * data.spread;
         pos[i3 + 2] = (Math.random() - 0.5) * data.spread * 2;
-        vel[i3]     = (Math.random() - 0.5) * 0.3;
+        vel[i3] = (Math.random() - 0.5) * 0.3;
         vel[i3 + 1] = 0;
         vel[i3 + 2] = (Math.random() - 0.5) * 0.3;
       } else {
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
-        vel[i3]     = Math.sin(phi) * Math.cos(theta) * data.spread;
+        vel[i3] = Math.sin(phi) * Math.cos(theta) * data.spread;
         vel[i3 + 1] = Math.sin(phi) * Math.sin(theta) * data.spread;
         vel[i3 + 2] = Math.cos(phi) * data.spread;
       }
-      rot[i3]     = (Math.random() - 0.5) * 4;
+      rot[i3] = (Math.random() - 0.5) * 4;
       rot[i3 + 1] = (Math.random() - 0.5) * 4;
       rot[i3 + 2] = (Math.random() - 0.5) * 4;
     }
@@ -221,10 +324,10 @@ function ParticlesElement({ data }: { data: T3dParticles }) {
       if (ages[i] > data.lifetime) {
         ages[i] = 0;
         if (isVolume) {
-          pos[i3]     = (Math.random() - 0.5) * data.spread * 2;
+          pos[i3] = (Math.random() - 0.5) * data.spread * 2;
           pos[i3 + 1] = Math.random() * data.spread;
           pos[i3 + 2] = (Math.random() - 0.5) * data.spread * 2;
-          vel[i3]     = (Math.random() - 0.5) * 0.3;
+          vel[i3] = (Math.random() - 0.5) * 0.3;
           vel[i3 + 2] = (Math.random() - 0.5) * 0.3;
         } else {
           dummy.position.set(0, 0, 0);
@@ -236,7 +339,7 @@ function ParticlesElement({ data }: { data: T3dParticles }) {
       if (isVolume) {
         // Gentle fall with horizontal wobble
         dummy.position.set(
-          pos[i3]     + vel[i3] * t + Math.sin(t * 2 + i) * 0.2,
+          pos[i3] + vel[i3] * t + Math.sin(t * 2 + i) * 0.2,
           pos[i3 + 1] - data.gravity * t * data.speed,
           pos[i3 + 2] + vel[i3 + 2] * t + Math.cos(t * 1.5 + i * 0.7) * 0.15,
         );
@@ -259,21 +362,35 @@ function ParticlesElement({ data }: { data: T3dParticles }) {
   });
 
   // circleGeometry(r, 3) = equilateral triangle
-  const geometry = data.particleShape === 'triangle'
-    ? <circleGeometry args={[1, 3]} />
-    : data.particleShape === 'plane'
-      ? <planeGeometry args={[1, 1]} />
-      : <sphereGeometry args={[1, 8, 8]} />;
+  const geometry =
+    data.particleShape === 'triangle' ? (
+      <circleGeometry args={[1, 3]} />
+    ) : data.particleShape === 'plane' ? (
+      <planeGeometry args={[1, 1]} />
+    ) : (
+      <sphereGeometry args={[1, 8, 8]} />
+    );
 
   const side = data.particleShape !== 'sphere' ? THREE.DoubleSide : undefined;
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, data.count]}>
       {geometry}
-      {data.emissive
-        ? <meshBasicMaterial color={data.color} transparent opacity={data.opacityOverLifetime ? 0.8 : 1} side={side} />
-        : <meshStandardMaterial color={data.color} transparent opacity={data.opacityOverLifetime ? 0.8 : 1} side={side} />
-      }
+      {data.emissive ? (
+        <meshBasicMaterial
+          color={data.color}
+          transparent
+          opacity={data.opacityOverLifetime ? 0.8 : 1}
+          side={side}
+        />
+      ) : (
+        <meshStandardMaterial
+          color={data.color}
+          transparent
+          opacity={data.opacityOverLifetime ? 0.8 : 1}
+          side={side}
+        />
+      )}
     </instancedMesh>
   );
 }
@@ -285,7 +402,9 @@ function LineElement({ data }: { data: T3dLine }) {
     try {
       const arr = JSON.parse(data.points) as number[][];
       return arr.map(([x, y, z]) => new THREE.Vector3(x, y, z));
-    } catch { return [new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, 0)]; }
+    } catch {
+      return [new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, 0)];
+    }
   }, [data.points]);
 
   const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
@@ -315,7 +434,9 @@ function TrailElement({ data, children }: { data: T3dTrail; children: React.Reac
       width={data.width}
       length={data.length}
       color={data.colorStart}
-      attenuation={(t: number) => data.attenuation === 'none' ? 1 : data.attenuation === 'squared' ? t * t : t}
+      attenuation={(t: number) =>
+        data.attenuation === 'none' ? 1 : data.attenuation === 'squared' ? t * t : t
+      }
     >
       {children}
     </Trail>
@@ -324,7 +445,11 @@ function TrailElement({ data, children }: { data: T3dTrail; children: React.Reac
 
 // --- Script runner (client-side useFrame update loop) ---
 
-function ScriptRunner({ path, code, groupRef }: {
+function ScriptRunner({
+  path,
+  code,
+  groupRef,
+}: {
   path: string;
   code: string;
   groupRef: React.RefObject<THREE.Group | null>;
@@ -358,7 +483,8 @@ function ScriptRunner({ path, code, groupRef }: {
     if (!fnRef.current || !node) return;
     try {
       fnRef.current({
-        node, dt,
+        node,
+        dt,
         time: state.clock.elapsedTime,
         ref: groupRef.current,
         execute: throttledExecute,
@@ -387,7 +513,7 @@ function TreeNode({ path }: { path: string }) {
   const mesh = getComponent(node, T3dMesh);
   const material = getComponent(node, T3dMaterial);
   const light = getComponent(node, T3dLight);
-  
+
   const text = getComponent(node, T3dText);
   const particles = getComponent(node, T3dParticles);
   const line = getComponent(node, T3dLine);
@@ -450,4 +576,4 @@ export const SceneView: View<T3dScene> = ({ ctx }) => {
       </Canvas>
     </div>
   );
-}
+};

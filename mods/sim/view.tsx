@@ -1,4 +1,4 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // AgentSim views — World map + Agent card + Item card
 // WorldView: controls, spatial map with entities + proximity links, event log
@@ -9,17 +9,17 @@ import { getComponent } from '@treenx/core';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
-import { useCallback,useMemo,useRef,useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-type EventEntry,
-SimAi,
-SimConfig,
-SimDescriptive,
-SimEvents,
-SimMemory,
-SimNearby,
-SimPosition,
-SimRound,
+  type EventEntry,
+  SimAi,
+  SimConfig,
+  SimDescriptive,
+  SimEvents,
+  SimMemory,
+  SimNearby,
+  SimPosition,
+  SimRound,
 } from './types';
 
 type Link = { x1: number; y1: number; x2: number; y2: number; opacity: number };
@@ -47,7 +47,10 @@ function buildLinks(entities: PresentationNode[]): Link[] {
       const d = Math.sqrt((pos.x - op.x) ** 2 + (pos.y - op.y) ** 2);
       const maxR = Math.max(pos.radius, op.radius);
       links.push({
-        x1: pos.x, y1: pos.y, x2: op.x, y2: op.y,
+        x1: pos.x,
+        y1: pos.y,
+        x2: op.x,
+        y2: op.y,
         opacity: maxR > 0 ? 0.15 + 0.35 * (1 - d / maxR) : 0.3,
       });
     }
@@ -88,14 +91,19 @@ function WorldView() {
   const [error, setError] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
 
-  const call = useCallback((p: { path: string; action: string; data?: unknown }) => {
-    setError(null);
-    execute(p.path, p.action, p.data).catch((e) => setError(errMsg(e)));
-  }, [execute]);
+  const call = useCallback(
+    (p: { path: string; action: string; data?: unknown }) => {
+      setError(null);
+      execute(p.path, p.action, p.data).catch((e) => setError(errMsg(e)));
+    },
+    [execute],
+  );
 
   const cfg = getComponent(node, SimConfig);
   const round = getComponent(node, SimRound);
-  const entities = children.filter((n: PresentationNode) => n.$type === 'sim.agent' || n.$type === 'sim.item');
+  const entities = children.filter(
+    (n: PresentationNode) => n.$type === 'sim.agent' || n.$type === 'sim.item',
+  );
   const W = cfg?.width ?? 600;
   const H = cfg?.height ?? 400;
   const log = round?.log ?? [];
@@ -127,7 +135,15 @@ function WorldView() {
   return (
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>
       {/* Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+          flexWrap: 'wrap',
+        }}
+      >
         <button
           onClick={toggle}
           style={{
@@ -140,9 +156,7 @@ function WorldView() {
           {cfg?.running ? 'Stop' : 'Start'}
         </button>
         <span style={{ color: 'var(--text-2)' }}>R{round?.current ?? 0}</span>
-        {round?.phase === 'thinking' && (
-          <span style={{ color: 'var(--accent)' }}>thinking...</span>
-        )}
+        {round?.phase === 'thinking' && <span style={{ color: 'var(--accent)' }}>thinking...</span>}
         <span style={{ color: 'var(--text-3)', fontSize: 11 }}>|</span>
         {[1000, 3000, 5000, 10000].map((d) => (
           <button
@@ -164,7 +178,18 @@ function WorldView() {
       </div>
 
       {error && (
-        <div onClick={() => setError(null)} style={{ padding: '6px 12px', marginBottom: 8, background: 'var(--danger, #c44)', color: '#fff', borderRadius: 'var(--radius)', fontSize: 12, cursor: 'pointer' }}>
+        <div
+          onClick={() => setError(null)}
+          style={{
+            padding: '6px 12px',
+            marginBottom: 8,
+            background: 'var(--danger, #c44)',
+            color: '#fff',
+            borderRadius: 'var(--radius)',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
           {error}
         </div>
       )}
@@ -192,7 +217,10 @@ function WorldView() {
           {links.map((l, i) => (
             <line
               key={i}
-              x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+              x1={l.x1}
+              y1={l.y1}
+              x2={l.x2}
+              y2={l.y2}
               stroke="var(--accent, #6366f1)"
               strokeWidth={1.5}
               opacity={l.opacity}
@@ -222,7 +250,10 @@ function WorldView() {
                 }}
               />
               <div
-                onClick={(e) => { e.stopPropagation(); setSelected(isSel ? null : a.$path); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelected(isSel ? null : a.$path);
+                }}
                 style={{
                   position: 'absolute',
                   left: pos.x - (isItem ? 12 : 16),
@@ -231,7 +262,9 @@ function WorldView() {
                   height: isItem ? 24 : 32,
                   borderRadius: isItem ? 'var(--radius)' : '50%',
                   background: isItem ? 'var(--surface)' : 'var(--accent)',
-                  border: isSel ? '2px solid #fff' : `1px solid ${isItem ? 'var(--border)' : 'transparent'}`,
+                  border: isSel
+                    ? '2px solid #fff'
+                    : `1px solid ${isItem ? 'var(--border)' : 'transparent'}`,
                   boxShadow: isSel ? '0 0 0 2px var(--accent)' : 'none',
                   display: 'flex',
                   alignItems: 'center',
@@ -265,7 +298,16 @@ function WorldView() {
         })}
 
         {entities.length === 0 && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-3)',
+            }}
+          >
             No entities — add sim.agent or sim.item children
           </div>
         )}
@@ -273,7 +315,15 @@ function WorldView() {
 
       {/* Event Log */}
       <div style={{ marginTop: 12, maxHeight: 240, overflowY: 'auto' }}>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: 6,
+          }}
+        >
           Event Log ({log.length})
         </div>
         {log.length === 0 && (
@@ -286,7 +336,8 @@ function WorldView() {
               display: 'flex',
               gap: 8,
               padding: '4px 8px',
-              background: e.round === lastRound ? 'var(--accent-bg, rgba(99,102,241,0.08))' : 'transparent',
+              background:
+                e.round === lastRound ? 'var(--accent-bg, rgba(99,102,241,0.08))' : 'transparent',
               borderRadius: 'var(--radius)',
               fontSize: 12,
             }}
@@ -324,8 +375,7 @@ function AgentView() {
   const savePrompt = useCallback(() => {
     if (editPrompt === null) return;
     setError(null);
-    execute(node.$path, 'update', { systemPrompt: editPrompt })
-      .catch((e) => setError(errMsg(e)));
+    execute(node.$path, 'update', { systemPrompt: editPrompt }).catch((e) => setError(errMsg(e)));
     setEditPrompt(null);
   }, [node.$path, editPrompt, execute]);
 
@@ -333,7 +383,18 @@ function AgentView() {
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13, maxWidth: 500 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            background: 'var(--accent)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 24,
+          }}
+        >
           {desc?.icon ?? '?'}
         </div>
         <div>
@@ -343,23 +404,57 @@ function AgentView() {
       </div>
 
       {error && (
-        <div onClick={() => setError(null)} style={{ padding: '6px 12px', marginBottom: 8, background: 'var(--danger, #c44)', color: '#fff', borderRadius: 'var(--radius)', fontSize: 12, cursor: 'pointer' }}>
+        <div
+          onClick={() => setError(null)}
+          style={{
+            padding: '6px 12px',
+            marginBottom: 8,
+            background: 'var(--danger, #c44)',
+            color: '#fff',
+            borderRadius: 'var(--radius)',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
           {error}
         </div>
       )}
 
       {pos && (
-        <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', borderRadius: 'var(--radius)' }}>
+        <div
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 'var(--radius)',
+          }}
+        >
           Position: ({pos.x}, {pos.y}) &middot; Radius: {pos.radius}
         </div>
       )}
 
       {/* System Prompt */}
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
           System Prompt
           {editPrompt === null && (
-            <button onClick={() => setEditPrompt(ai?.systemPrompt ?? '')} style={{ ...btn, fontSize: 10, padding: '2px 8px' }}>Edit</button>
+            <button
+              onClick={() => setEditPrompt(ai?.systemPrompt ?? '')}
+              style={{ ...btn, fontSize: 10, padding: '2px 8px' }}
+            >
+              Edit
+            </button>
           )}
         </div>
         {editPrompt !== null ? (
@@ -367,16 +462,41 @@ function AgentView() {
             <textarea
               value={editPrompt}
               onChange={(e) => setEditPrompt(e.target.value)}
-              style={{ width: '100%', minHeight: 80, padding: 8, borderRadius: 'var(--radius)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, resize: 'vertical' }}
+              style={{
+                width: '100%',
+                minHeight: 80,
+                padding: 8,
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                fontFamily: 'var(--mono)',
+                fontSize: 12,
+                resize: 'vertical',
+              }}
               autoFocus
             />
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              <button onClick={savePrompt} style={{ ...btn, background: 'var(--accent)', color: '#fff' }}>Save</button>
-              <button onClick={() => setEditPrompt(null)} style={btn}>Cancel</button>
+              <button
+                onClick={savePrompt}
+                style={{ ...btn, background: 'var(--accent)', color: '#fff' }}
+              >
+                Save
+              </button>
+              <button onClick={() => setEditPrompt(null)} style={btn}>
+                Cancel
+              </button>
             </div>
           </div>
         ) : (
-          <div style={{ padding: '4px 8px', fontSize: 12, color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>
+          <div
+            style={{
+              padding: '4px 8px',
+              fontSize: 12,
+              color: 'var(--text-2)',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
             {ai?.systemPrompt ?? '(none)'}
           </div>
         )}
@@ -384,32 +504,77 @@ function AgentView() {
 
       {/* Event Inbox */}
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: 6,
+          }}
+        >
           Event Inbox ({events.length})
         </div>
-        {events.length === 0 && <div style={{ color: 'var(--text-3)', padding: 8 }}>No events yet</div>}
-        {[...events].reverse().slice(0, 15).map((e, i) => (
-          <div key={i} style={{ padding: '3px 8px', fontSize: 11, color: 'var(--text-2)', display: 'flex', gap: 6 }}>
-            <span style={{ color: 'var(--text-3)', minWidth: 24 }}>R{e.round}</span>
-            <span style={{ color: 'var(--accent)' }}>{e.from}</span>
-            <span>{e.type}{e.to ? `→${e.to}` : ''}</span>
-            <span style={{ flex: 1, color: 'var(--text-3)' }}>
-              {e.data?.message ? `"${e.data.message}"` : JSON.stringify(e.data).slice(0, 60)}
-            </span>
-          </div>
-        ))}
+        {events.length === 0 && (
+          <div style={{ color: 'var(--text-3)', padding: 8 }}>No events yet</div>
+        )}
+        {[...events]
+          .reverse()
+          .slice(0, 15)
+          .map((e, i) => (
+            <div
+              key={i}
+              style={{
+                padding: '3px 8px',
+                fontSize: 11,
+                color: 'var(--text-2)',
+                display: 'flex',
+                gap: 6,
+              }}
+            >
+              <span style={{ color: 'var(--text-3)', minWidth: 24 }}>R{e.round}</span>
+              <span style={{ color: 'var(--accent)' }}>{e.from}</span>
+              <span>
+                {e.type}
+                {e.to ? `→${e.to}` : ''}
+              </span>
+              <span style={{ flex: 1, color: 'var(--text-3)' }}>
+                {e.data?.message ? `"${e.data.message}"` : JSON.stringify(e.data).slice(0, 60)}
+              </span>
+            </div>
+          ))}
       </div>
 
       {/* Memory */}
       <div>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: 6,
+          }}
+        >
           Memory ({mem?.entries?.length ?? 0})
         </div>
         {(!mem?.entries || mem.entries.length === 0) && (
           <div style={{ color: 'var(--text-3)', padding: 8 }}>Empty memory</div>
         )}
         {mem?.entries?.map((e, i) => (
-          <div key={i} style={{ padding: '4px 8px', fontSize: 12, color: 'var(--text-2)', background: i === (mem.entries.length ?? 0) - 1 ? 'var(--accent-bg, rgba(99,102,241,0.08))' : 'transparent', borderRadius: 'var(--radius)' }}>
+          <div
+            key={i}
+            style={{
+              padding: '4px 8px',
+              fontSize: 12,
+              color: 'var(--text-2)',
+              background:
+                i === (mem.entries.length ?? 0) - 1
+                  ? 'var(--accent-bg, rgba(99,102,241,0.08))'
+                  : 'transparent',
+              borderRadius: 'var(--radius)',
+            }}
+          >
             {e}
           </div>
         ))}
@@ -428,7 +593,19 @@ function ItemView() {
   return (
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13, maxWidth: 400 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 'var(--radius)', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 'var(--radius)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 20,
+          }}
+        >
           {desc?.icon ?? '?'}
         </div>
         <div>
@@ -437,7 +614,15 @@ function ItemView() {
         </div>
       </div>
       {pos && (
-        <div style={{ padding: '8px 12px', background: 'var(--surface)', borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--text-2)' }}>
+        <div
+          style={{
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 'var(--radius)',
+            fontSize: 12,
+            color: 'var(--text-2)',
+          }}
+        >
           Position: ({pos.x}, {pos.y}) &middot; Radius: {pos.radius}
         </div>
       )}
@@ -449,6 +634,6 @@ export const clientModules = [
   declareClientModule('@treenx/mods/sim/view', [
     declareView('sim.world', 'react', WorldView),
     declareView('sim.agent', 'react', AgentView),
-    declareView('sim.item', 'react', ItemView)
-  ])
+    declareView('sim.item', 'react', ItemView),
+  ]),
 ];

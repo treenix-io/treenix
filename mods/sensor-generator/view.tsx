@@ -27,13 +27,15 @@ function GeneratorDemo() {
     setError(null);
     setRunning(true);
     const pieces = effects.stream({
-      path: node.$path, type: 'examples.demo.generator', action: 'scan', args: { count: 10, delay: 500 },
+      path: node.$path,
+      type: 'examples.demo.generator',
+      action: 'scan',
+      args: { count: 10, delay: 500 },
     });
     let cancelled = false;
     void (async () => {
       try {
-        for await (const reading of pieces)
-          if (!cancelled) setItems(prev => [...prev, reading]);
+        for await (const reading of pieces) if (!cancelled) setItems((prev) => [...prev, reading]);
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -42,11 +44,19 @@ function GeneratorDemo() {
     })();
     unsubRef.current = () => {
       cancelled = true;
-      void pieces.return?.().catch(reason => console.error('Sensor scan cancellation failed', reason));
+      void pieces
+        .return?.()
+        .catch((reason) => console.error('Sensor scan cancellation failed', reason));
     };
   }, [node.$path, effects]);
 
-  useEffect(() => () => { unsubRef.current?.(); unsubRef.current = null; }, [node.$path]);
+  useEffect(
+    () => () => {
+      unsubRef.current?.();
+      unsubRef.current = null;
+    },
+    [node.$path],
+  );
 
   const stop = useCallback(() => {
     unsubRef.current?.();
@@ -56,7 +66,11 @@ function GeneratorDemo() {
 
   return (
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>
-      {error && <p role="alert" className="text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-destructive">
+          {error}
+        </p>
+      )}
       <div
         style={{
           fontSize: 11,
@@ -126,6 +140,6 @@ function GeneratorDemo() {
 
 export const clientModules = [
   declareClientModule('@treenx/mods/sensor-generator/view', [
-    declareView('examples.demo.generator', 'react', GeneratorDemo)
-  ])
+    declareView('examples.demo.generator', 'react', GeneratorDemo),
+  ]),
 ];

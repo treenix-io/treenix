@@ -1,23 +1,39 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Universal component views — compact, embeddable in any node
 
-import { type View,useActions } from '@treenx/react';
+import { type View, useActions } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
-import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/ui/select';
-import { useEffect,useRef,useState } from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@treenx/react/ui/select';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ATTACHABLE_COMPONENTS,TChecklist,TComments,TEstimate,TLinks,TTags,TTimeTrack } from './types';
+import {
+  ATTACHABLE_COMPONENTS,
+  TChecklist,
+  TComments,
+  TEstimate,
+  TLinks,
+  TTags,
+  TTimeTrack,
+} from './types';
 
 // ── Section wrapper ──
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
       {children}
     </div>
   );
@@ -30,7 +46,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const items = value.items;
-  const doneCount = items.filter(i => i.done).length;
+  const doneCount = items.filter((i) => i.done).length;
 
   return (
     <Section label={`Checklist${items.length ? ` (${doneCount}/${items.length})` : ''}`}>
@@ -45,7 +61,10 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
 
       <ul className="space-y-1">
         {items.map((item) => (
-          <li key={item.id} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.04]">
+          <li
+            key={item.id}
+            className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.04]"
+          >
             <button
               className={cn(
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
@@ -55,7 +74,11 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
             >
               {item.done ? '✓' : ''}
             </button>
-            <span className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}>{item.text}</span>
+            <span
+              className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}
+            >
+              {item.text}
+            </span>
             <button
               className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block"
               onClick={() => actions.remove({ id: item.id })}
@@ -68,7 +91,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
 
       <form
         className="mt-2 flex gap-1.5"
-        onSubmit={e => {
+        onSubmit={(e) => {
           e.preventDefault();
           if (!draft.trim()) return;
           actions.add({ text: draft });
@@ -79,17 +102,17 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
         <Input
           ref={inputRef}
           value={draft}
-          onChange={e => setDraft(e.target.value)}
+          onChange={(e) => setDraft(e.target.value)}
           placeholder="Add item..."
           className="h-7 flex-1 text-xs"
         />
-        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">+</Button>
+        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">
+          +
+        </Button>
       </form>
     </Section>
   );
 };
-
-
 
 // ── Tags ──
 
@@ -119,10 +142,19 @@ const TagsView: View<TTags> = ({ value }) => {
   return (
     <Section label="Tags">
       <div className="flex flex-wrap gap-1.5">
-        {items.map(tag => (
-          <span key={tag} className={cn('group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', tagColor(tag))}>
+        {items.map((tag) => (
+          <span
+            key={tag}
+            className={cn(
+              'group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+              tagColor(tag),
+            )}
+          >
             {tag}
-            <button className="hidden hover:text-white group-hover:inline" onClick={() => actions.remove({ tag })}>
+            <button
+              className="hidden hover:text-white group-hover:inline"
+              onClick={() => actions.remove({ tag })}
+            >
               ✕
             </button>
           </span>
@@ -140,7 +172,7 @@ const TagsView: View<TTags> = ({ value }) => {
         {adding && (
           <form
             className="inline-flex"
-            onSubmit={e => {
+            onSubmit={(e) => {
               e.preventDefault();
               if (draft.trim()) actions.add({ tag: draft });
               setDraft('');
@@ -150,7 +182,7 @@ const TagsView: View<TTags> = ({ value }) => {
             <Input
               autoFocus
               value={draft}
-              onChange={e => setDraft(e.target.value)}
+              onChange={(e) => setDraft(e.target.value)}
               onBlur={() => {
                 if (draft.trim()) actions.add({ tag: draft });
                 setDraft('');
@@ -166,8 +198,6 @@ const TagsView: View<TTags> = ({ value }) => {
   );
 };
 
-
-
 // ── Estimate ──
 
 const UNIT_LABELS: Record<string, string> = { hours: 'h', points: 'pts', days: 'd' };
@@ -176,7 +206,9 @@ const EstimateView: View<TEstimate> = ({ value }) => {
   const actions = useActions(value);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [draftUnit, setDraftUnit] = useState<'hours' | 'points' | 'days'>(typeof value.unit === 'string' ? value.unit as 'hours' | 'points' | 'days' : 'hours');
+  const [draftUnit, setDraftUnit] = useState<'hours' | 'points' | 'days'>(
+    typeof value.unit === 'string' ? (value.unit as 'hours' | 'points' | 'days') : 'hours',
+  );
   const v = typeof value.value === 'number' ? value.value : 0;
   const unit = typeof value.unit === 'string' ? value.unit : 'hours';
 
@@ -198,9 +230,14 @@ const EstimateView: View<TEstimate> = ({ value }) => {
             step={0.5}
             defaultValue={v}
             className="h-7 w-20 text-xs"
-            onKeyDown={e => { if (e.key === 'Enter') save(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') save();
+            }}
           />
-          <Select value={draftUnit} onValueChange={v => setDraftUnit(v as 'hours' | 'points' | 'days')}>
+          <Select
+            value={draftUnit}
+            onValueChange={(v) => setDraftUnit(v as 'hours' | 'points' | 'days')}
+          >
             <SelectTrigger className="h-7 w-24 text-xs">
               <SelectValue />
             </SelectTrigger>
@@ -210,7 +247,9 @@ const EstimateView: View<TEstimate> = ({ value }) => {
               <SelectItem value="days">Days</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={save}>OK</Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={save}>
+            OK
+          </Button>
         </div>
       </Section>
     );
@@ -227,8 +266,6 @@ const EstimateView: View<TEstimate> = ({ value }) => {
     </Section>
   );
 };
-
-
 
 // ── Links ──
 
@@ -249,11 +286,14 @@ const LinksView: View<TLinks> = ({ value }) => {
               target="_blank"
               rel="noopener noreferrer"
               className="flex-1 truncate text-sm text-blue-400 hover:underline"
-              onClick={e => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               {link.label || link.url}
             </a>
-            <button className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block" onClick={() => actions.remove({ id: link.id })}>
+            <button
+              className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block"
+              onClick={() => actions.remove({ id: link.id })}
+            >
               ✕
             </button>
           </li>
@@ -272,7 +312,7 @@ const LinksView: View<TLinks> = ({ value }) => {
       {adding && (
         <form
           className="mt-2 flex flex-col gap-1.5"
-          onSubmit={e => {
+          onSubmit={(e) => {
             e.preventDefault();
             if (url.trim()) actions.add({ url, label });
             setUrl('');
@@ -280,19 +320,38 @@ const LinksView: View<TLinks> = ({ value }) => {
             setAdding(false);
           }}
         >
-          <Input autoFocus value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+          <Input
+            autoFocus
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://..."
+            className="h-7 text-xs"
+          />
           <div className="flex gap-1.5">
-            <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="Label (optional)" className="h-7 flex-1 text-xs" />
-            <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs">Add</Button>
-            <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setAdding(false)}>Cancel</Button>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Label (optional)"
+              className="h-7 flex-1 text-xs"
+            />
+            <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs">
+              Add
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => setAdding(false)}
+            >
+              Cancel
+            </Button>
           </div>
         </form>
       )}
     </Section>
   );
 };
-
-
 
 // ── Comments ──
 
@@ -321,7 +380,7 @@ const CommentsView: View<TComments> = ({ value }) => {
 
       <form
         className="flex gap-1.5"
-        onSubmit={e => {
+        onSubmit={(e) => {
           e.preventDefault();
           if (!draft.trim()) return;
           actions.add({ text: draft });
@@ -330,17 +389,17 @@ const CommentsView: View<TComments> = ({ value }) => {
       >
         <Input
           value={draft}
-          onChange={e => setDraft(e.target.value)}
+          onChange={(e) => setDraft(e.target.value)}
           placeholder="Add comment..."
           className="h-7 flex-1 text-xs"
         />
-        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">Send</Button>
+        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">
+          Send
+        </Button>
       </form>
     </Section>
   );
 };
-
-
 
 // ── Time Track ──
 
@@ -360,7 +419,7 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
 
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => setTick(t => t + 1), 1000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [running]);
 
@@ -377,11 +436,21 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
         </span>
 
         {running ? (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => actions.stop()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => actions.stop()}
+          >
             Stop
           </Button>
         ) : (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => actions.start()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => actions.start()}
+          >
             Start
           </Button>
         )}
@@ -401,14 +470,12 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
   );
 };
 
-
-
 // ── Compact view (`react:compact`) — tiny preview, no controls ──
 
 const ChecklistCompact: View<TChecklist> = ({ value }) => {
   const items = value.items;
   if (!items.length) return null;
-  const doneCount = items.filter(i => i.done).length;
+  const doneCount = items.filter((i) => i.done).length;
 
   return (
     <div className="rounded-md bg-white/[0.02] px-2 py-1.5">
@@ -419,15 +486,19 @@ const ChecklistCompact: View<TChecklist> = ({ value }) => {
         />
       </div>
       <ul className="mt-1 space-y-0.5">
-        {items.slice(0, 4).map(item => (
+        {items.slice(0, 4).map((item) => (
           <li key={item.id} className="flex items-center gap-1.5 text-xs">
-            <span className={cn(
-              'inline-block h-3 w-3 shrink-0 rounded-sm border text-[8px] leading-3 text-center',
-              item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border',
-            )}>
+            <span
+              className={cn(
+                'inline-block h-3 w-3 shrink-0 rounded-sm border text-[8px] leading-3 text-center',
+                item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border',
+              )}
+            >
               {item.done ? '✓' : ''}
             </span>
-            <span className={cn('truncate', item.done && 'text-muted-foreground line-through')}>{item.text}</span>
+            <span className={cn('truncate', item.done && 'text-muted-foreground line-through')}>
+              {item.text}
+            </span>
           </li>
         ))}
         {items.length > 4 && (
@@ -438,14 +509,12 @@ const ChecklistCompact: View<TChecklist> = ({ value }) => {
   );
 };
 
-
-
 // ── Full view (default `react` context) — all items, toggle, progress ──
 
 const ChecklistFull: View<TChecklist> = ({ value }) => {
   const actions = useActions(value);
   const items = value.items;
-  const doneCount = items.filter(i => i.done).length;
+  const doneCount = items.filter((i) => i.done).length;
 
   return (
     <Section label={`Checklist${items.length ? ` (${doneCount}/${items.length})` : ''}`}>
@@ -462,18 +531,22 @@ const ChecklistFull: View<TChecklist> = ({ value }) => {
         <div className="text-xs text-muted-foreground">No items</div>
       ) : (
         <ul className="space-y-1">
-          {items.map(item => (
+          {items.map((item) => (
             <li key={item.id} className="flex items-center gap-2 rounded px-1 py-0.5">
               <button
                 className={cn(
                   'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
-                  item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border hover:border-border',
+                  item.done
+                    ? 'border-emerald-500 bg-emerald-500 text-white'
+                    : 'border-border hover:border-border',
                 )}
                 onClick={() => actions.toggle({ id: item.id })}
               >
                 {item.done ? '✓' : ''}
               </button>
-              <span className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}>
+              <span
+                className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}
+              >
                 {item.text}
               </span>
             </li>
@@ -484,24 +557,26 @@ const ChecklistFull: View<TChecklist> = ({ value }) => {
   );
 };
 
-
-
 const TagsRead: View<TTags> = ({ value }) => {
   const items = value.items;
   if (!items.length) return null;
 
   return (
     <div className="flex flex-wrap gap-1">
-      {items.map(tag => (
-        <span key={tag} className={cn('inline-block rounded-full px-2 py-0.5 text-[10px] font-medium', tagColor(tag))}>
+      {items.map((tag) => (
+        <span
+          key={tag}
+          className={cn(
+            'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium',
+            tagColor(tag),
+          )}
+        >
           {tag}
         </span>
       ))}
     </div>
   );
 };
-
-
 
 const EstimateRead: View<TEstimate> = ({ value }) => {
   const v = typeof value?.value === 'number' ? value.value : 0;
@@ -511,12 +586,13 @@ const EstimateRead: View<TEstimate> = ({ value }) => {
   return (
     <span className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-muted-foreground">
       <span>⏱</span>
-      <span className="font-medium text-foreground">{v}{UNIT_LABELS[unit] || unit}</span>
+      <span className="font-medium text-foreground">
+        {v}
+        {UNIT_LABELS[unit] || unit}
+      </span>
     </span>
   );
 };
-
-
 
 const LinksRead: View<TLinks> = ({ value }) => {
   const items = value.items;
@@ -524,13 +600,13 @@ const LinksRead: View<TLinks> = ({ value }) => {
 
   return (
     <div className="flex flex-wrap gap-1.5">
-      {items.map(link => (
+      {items.map((link) => (
         <a
           key={link.id}
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-blue-400 hover:underline"
         >
           <span>🔗</span>
@@ -540,8 +616,6 @@ const LinksRead: View<TLinks> = ({ value }) => {
     </div>
   );
 };
-
-
 
 const CommentsRead: View<TComments> = ({ value }) => {
   const items = value.items;
@@ -555,8 +629,6 @@ const CommentsRead: View<TComments> = ({ value }) => {
   );
 };
 
-
-
 const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
   const entries = value.entries;
   const running = value.running;
@@ -565,17 +637,17 @@ const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
   const total = entries.reduce((sum, e) => sum + ((e.end || Date.now()) - e.start), 0);
 
   return (
-    <span className={cn(
-      'inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[11px]',
-      running && 'text-emerald-400',
-    )}>
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[11px]',
+        running && 'text-emerald-400',
+      )}
+    >
       <span>⏲</span>
       <span>{formatDuration(total)}</span>
     </span>
   );
 };
-
-
 
 // ── AttachMenu — universal "add component" popover ──
 
@@ -591,9 +663,13 @@ function getAttachedKeys(node: PresentationNode): Set<string> {
   return keys;
 }
 
-function AttachDropdown({ items, onSelect, onClose }: {
+function AttachDropdown({
+  items,
+  onSelect,
+  onClose,
+}: {
   items: typeof ATTACHABLE_COMPONENTS;
-  onSelect: (c: typeof ATTACHABLE_COMPONENTS[number]) => void;
+  onSelect: (c: (typeof ATTACHABLE_COMPONENTS)[number]) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -603,13 +679,18 @@ function AttachDropdown({ items, onSelect, onClose }: {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const keyHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     document.addEventListener('mousedown', handler);
     document.addEventListener('keydown', keyHandler);
-    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', keyHandler); };
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler);
+    };
   }, [onClose]);
 
-  const filtered = items.filter(c => {
+  const filtered = items.filter((c) => {
     if (!filter) return true;
     const q = filter.toLowerCase();
     return c.label.toLowerCase().includes(q) || c.description.toLowerCase().includes(q);
@@ -624,13 +705,13 @@ function AttachDropdown({ items, onSelect, onClose }: {
         <Input
           autoFocus
           value={filter}
-          onChange={e => setFilter(e.target.value)}
+          onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter..."
           className="mb-2 h-7 text-xs"
         />
       )}
       <div className="max-h-48 space-y-0.5 overflow-y-auto">
-        {filtered.map(c => (
+        {filtered.map((c) => (
           <button
             key={c.key}
             className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/50"
@@ -653,9 +734,9 @@ export function AttachMenu({ node }: { node: PresentationNode }) {
   const [open, setOpen] = useState(false);
   const attached = getAttachedKeys(node);
 
-  const available = ATTACHABLE_COMPONENTS.filter(c => !attached.has(c.key));
+  const available = ATTACHABLE_COMPONENTS.filter((c) => !attached.has(c.key));
 
-  const attach = async (c: typeof ATTACHABLE_COMPONENTS[number]) => {
+  const attach = async (c: (typeof ATTACHABLE_COMPONENTS)[number]) => {
     try {
       await patchNode(node.$path, { [c.key]: { $type: c.type, ...c.defaults } });
       toast.success(`${c.label} attached`);
@@ -674,13 +755,13 @@ export function AttachMenu({ node }: { node: PresentationNode }) {
     }
   };
 
-  const attachedList = ATTACHABLE_COMPONENTS.filter(c => attached.has(c.key));
+  const attachedList = ATTACHABLE_COMPONENTS.filter((c) => attached.has(c.key));
 
   if (available.length === 0 && attachedList.length === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {attachedList.map(c => (
+      {attachedList.map((c) => (
         <span
           key={c.key}
           className="group inline-flex items-center gap-1 rounded-md bg-white/5 px-2 py-0.5 text-xs text-muted-foreground"
@@ -701,12 +782,14 @@ export function AttachMenu({ node }: { node: PresentationNode }) {
         <div className="relative">
           <button
             className="rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-border hover:text-foreground"
-            onClick={() => setOpen(v => !v)}
+            onClick={() => setOpen((v) => !v)}
           >
             + Component
           </button>
 
-          {open && <AttachDropdown items={available} onSelect={attach} onClose={() => setOpen(false)} />}
+          {open && (
+            <AttachDropdown items={available} onSelect={attach} onClose={() => setOpen(false)} />
+          )}
         </div>
       )}
     </div>
@@ -727,6 +810,6 @@ export const clientModules = [
     declareView(TEstimate, 'react', EstimateRead),
     declareView(TLinks, 'react', LinksRead),
     declareView(TComments, 'react', CommentsRead),
-    declareView(TTimeTrack, 'react', TimeTrackRead)
-  ])
+    declareView(TTimeTrack, 'react', TimeTrackRead),
+  ]),
 ];

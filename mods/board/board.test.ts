@@ -4,7 +4,7 @@ import { getComponent, type NodeData, normalizeType } from '@treenx/core';
 import createNativePlan from '../../../mods/plan/kernel';
 const boardManifest = createNativePlan().manifest;
 function taskType() {
-  const type = boardManifest.types.find(type => type.name === 'board.task');
+  const type = boardManifest.types.find((type) => type.name === 'board.task');
   assert.ok(type);
   return type;
 }
@@ -43,13 +43,16 @@ describe('board.task registration', () => {
 describe('board.order component', () => {
   it('is registered as a component type', () => {
     assert.equal(normalizeType(Order), 'board.order');
-    assert.ok(boardManifest.types.some(type => type.name === normalizeType(Order)));
+    assert.ok(boardManifest.types.some((type) => type.name === normalizeType(Order)));
   });
 
   it('reads back the same component from a task and a column', () => {
     const task = makeTask({ '#order': { $type: 'board.order', order: 1.5 } } as Partial<NodeData>);
     const column: NodeData = {
-      $path: '/board/todo', $type: 'board.column', label: 'To Do', color: 'border-border',
+      $path: '/board/todo',
+      $type: 'board.column',
+      label: 'To Do',
+      color: 'border-border',
       '#order': { $type: 'board.order', order: 3 },
     } as NodeData;
 
@@ -63,9 +66,17 @@ describe('board.order component', () => {
 
   it('nodes sort by their fractional order', () => {
     const mk = (id: string, order: number): NodeData =>
-      makeTask({ $path: `/board/data/${id}`, '#order': { $type: 'board.order', order } } as Partial<NodeData>);
+      makeTask({
+        $path: `/board/data/${id}`,
+        '#order': { $type: 'board.order', order },
+      } as Partial<NodeData>);
     const nodes = [mk('c', 2), mk('a', 0.5), mk('b', 1)];
-    const sorted = [...nodes].sort((x, y) => (getComponent(x, Order)?.order ?? 0) - (getComponent(y, Order)?.order ?? 0));
-    assert.deepEqual(sorted.map((n) => n.$path.split('/').at(-1)), ['a', 'b', 'c']);
+    const sorted = [...nodes].sort(
+      (x, y) => (getComponent(x, Order)?.order ?? 0) - (getComponent(y, Order)?.order ?? 0),
+    );
+    assert.deepEqual(
+      sorted.map((n) => n.$path.split('/').at(-1)),
+      ['a', 'b', 'c'],
+    );
   });
 });

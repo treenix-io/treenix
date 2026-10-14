@@ -1,46 +1,52 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Board views — kanban board + task detail (editable)
 
 import {
-DndContext,
-type DragEndEvent,
-type DragOverEvent,
-DragOverlay,
-type DragStartEvent,
-pointerWithin,
-PointerSensor,
-useDroppable,
-useSensor,
-useSensors,
+  DndContext,
+  type DragEndEvent,
+  type DragOverEvent,
+  DragOverlay,
+  type DragStartEvent,
+  pointerWithin,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
 } from '@dnd-kit/core';
-import { arrayMove,horizontalListSortingStrategy,SortableContext,useSortable,verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+  arrayMove,
+  horizontalListSortingStrategy,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getComponent,type NodeData } from '@treenx/core';
-import { Render,RenderContext,useActions,useDraft,type View } from '@treenx/react';
-import { useTreeEffects,useChildren,usePath } from '@treenx/react';
+import { getComponent, type NodeData } from '@treenx/core';
+import { Render, RenderContext, useActions, useDraft, type View } from '@treenx/react';
+import { useTreeEffects, useChildren, usePath } from '@treenx/react';
 import { usePathSave } from '@treenx/react';
 import { cleanSlug } from '@treenx/react/lib/string-utils';
 import { minimd } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
-import { Dialog,DialogContent,DialogTitle } from '@treenx/react/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@treenx/react/ui/dialog';
 import { FormField } from '@treenx/react/ui/form-field';
 import { Input } from '@treenx/react/ui/input';
 import {
-Select,
-SelectContent,
-SelectItem,
-SelectTrigger,
-SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@treenx/react/ui/select';
 import { Textarea } from '@treenx/react/ui/textarea';
-import { useMemo,useRef,useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { AttachMenu,clientModules as declaredClient0 } from '../simple-components/view';
+import { AttachMenu, clientModules as declaredClient0 } from '../simple-components/view';
 import { getNamedComponents } from './named-components';
-import { columnData,orderComponent } from './data';
-import { BoardColumn,BoardKanban,BoardTask,Order } from './types';
+import { columnData, orderComponent } from './data';
+import { BoardColumn, BoardKanban, BoardTask, Order } from './types';
 
 type TaskStatus = string;
 
@@ -58,10 +64,13 @@ const taskOrder = (t: PresentationNode): number =>
 
 // Fractional position between two neighbor orders (either may be absent at an edge).
 const between = (prev: number | null, next: number | null): number =>
-  prev !== null && next !== null ? (prev + next) / 2
-    : prev !== null ? prev + 1
-    : next !== null ? next - 1
-    : Date.now();
+  prev !== null && next !== null
+    ? (prev + next) / 2
+    : prev !== null
+      ? prev + 1
+      : next !== null
+        ? next - 1
+        : Date.now();
 
 async function withToast(fn: () => Promise<unknown>, successMsg?: string) {
   try {
@@ -218,8 +227,6 @@ const TaskEdit: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
   );
 };
 
-
-
 function NamedComponents({ node }: { node: PresentationNode }) {
   const entries = getNamedComponents(node);
   if (!entries.length) return null;
@@ -349,9 +356,6 @@ const TaskListItem: View<BoardTask> = ({ value, ctx }) => {
   );
 };
 
-
-
-
 // ── board.task read-only view (default react context) ──
 
 const TaskReadView: View<BoardTask> = ({ value, ctx }) => {
@@ -423,8 +427,6 @@ const TaskReadView: View<BoardTask> = ({ value, ctx }) => {
     </div>
   );
 };
-
-
 
 // ── Helpers ──
 
@@ -524,7 +526,6 @@ function TaskCard({
   onSelect: (path: string) => void;
   colStatus: string;
 }) {
-  
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.$path,
     data: { task, status: colStatus },
@@ -534,7 +535,9 @@ function TaskCard({
   // Active card: DragOverlay is the moving visual — suppress the pointer-follow
   // transform here so the in-place card stays parked as a dimmed placeholder
   // (transform + 200ms transition on it = double motion, rubber-band jitter).
-  const style = isDragging ? undefined : { transform: CSS.Transform.toString(transform), transition };
+  const style = isDragging
+    ? undefined
+    : { transform: CSS.Transform.toString(transform), transition };
 
   return (
     <div
@@ -584,7 +587,10 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
   const { removeNode } = useTreeEffects();
   const path = ctx!.node.$path;
   const status = path.split('/').at(-1) ?? '';
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `col:${status}`, data: { status } });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `col:${status}`,
+    data: { status },
+  });
   const sortable = useSortable({
     id: path,
     data: { type: 'column', path },
@@ -655,7 +661,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
             )}
           >
             {tasks.map((task) => (
-              <div key={task.$path} className='mb-2'>
+              <div key={task.$path} className="mb-2">
                 <TaskCard task={task} onSelect={onSelect} colStatus={status} />
               </div>
             ))}
@@ -667,7 +673,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
                 tasks.length === 0 && 'py-6',
               )}
             >
-              {(isOver || overStatus === status) ? 'Drop here' : '+ Add task'}
+              {isOver || overStatus === status ? 'Drop here' : '+ Add task'}
             </button>
           </div>
         </SortableContext>
@@ -676,15 +682,16 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
   );
 };
 
-const KanbanColumnEdit: View<BoardColumn, ColumnExtra> = (props) => <KanbanColumn {...props} editable />;
-
-
+const KanbanColumnEdit: View<BoardColumn, ColumnExtra> = (props) => (
+  <KanbanColumn {...props} editable />
+);
 
 // board.order is a positioning aspect — never rendered as a card component.
 // Exact registration per context so it wins over the generic default view.
 const OrderHidden: View<Order> = () => null;
-const orderViews = ['react', 'react:compact', 'react:card', 'react:list', 'react:edit']
-  .map(context => declareView(Order, context, OrderHidden));
+const orderViews = ['react', 'react:compact', 'react:card', 'react:list', 'react:edit'].map(
+  (context) => declareView(Order, context, OrderHidden),
+);
 
 function TaskDialog({
   node,
@@ -811,8 +818,11 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ ctx, editable =
     const maxOrder = Math.max(0, ...columns.map(columnOrder));
 
     await withToast(async () => {
-      await createNode(`${basePath}/${slug}`, 'board.column',
-        columnData(label.trim(), maxOrder + 1, `${basePath}/data`, slug));
+      await createNode(
+        `${basePath}/${slug}`,
+        'board.column',
+        columnData(label.trim(), maxOrder + 1, `${basePath}/data`, slug),
+      );
     }, `Column "${label.trim()}" created`);
   };
 
@@ -844,8 +854,8 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ ctx, editable =
       const fromPath = String(activeData.path);
       const toPath = String(overData.path);
       if (fromPath === toPath) return;
-      const fromIdx = columns.findIndex(c => c.$path === fromPath);
-      const toIdx = columns.findIndex(c => c.$path === toPath);
+      const fromIdx = columns.findIndex((c) => c.$path === fromPath);
+      const toIdx = columns.findIndex((c) => c.$path === toPath);
       if (fromIdx < 0 || toIdx < 0) return;
 
       const reordered = arrayMove(columns, fromIdx, toIdx);
@@ -859,7 +869,8 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ ctx, editable =
     }
 
     // ── task drag ──
-    if (!activeData?.task || typeof activeData.task !== 'object' || !('status' in activeData.task)) return;
+    if (!activeData?.task || typeof activeData.task !== 'object' || !('status' in activeData.task))
+      return;
     const activeTask = activeData.task as NodeData;
     const taskPath = activeTask.$path;
     const currentStatus = typeof activeTask.status === 'string' ? activeTask.status : '';
@@ -902,9 +913,15 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ ctx, editable =
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
-        onDragCancel={() => { setActiveTask(null); setOverStatus(null); }}
+        onDragCancel={() => {
+          setActiveTask(null);
+          setOverStatus(null);
+        }}
       >
-        <SortableContext items={columns.map(c => c.$path)} strategy={horizontalListSortingStrategy}>
+        <SortableContext
+          items={columns.map((c) => c.$path)}
+          strategy={horizontalListSortingStrategy}
+        >
           <div className="flex gap-3 overflow-x-auto pb-2">
             {columns.map((col) => (
               <Render
@@ -972,7 +989,7 @@ export const clientModules = [
     declareView('board.column', 'react', KanbanColumn),
     declareView('board.kanban', 'react:edit', KanbanEditWrap),
     declareView('board.kanban', 'react', KanbanView),
-    ...orderViews
+    ...orderViews,
   ]),
-  ...declaredClient0
+  ...declaredClient0,
 ];

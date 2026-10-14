@@ -4,8 +4,14 @@ export interface NativeBranchWrapper {
   readonly baseId: NodeId | null;
   readonly baseRev: Rev | null;
 }
-export interface NativeBranchDelta extends NativeBranchWrapper { readonly node: StoreBindingBody }
-export interface NativeBranchConflict { readonly path: string; readonly expectedRev: Rev | null; readonly actualRev: Rev | null }
+export interface NativeBranchDelta extends NativeBranchWrapper {
+  readonly node: StoreBindingBody;
+}
+export interface NativeBranchConflict {
+  readonly path: string;
+  readonly expectedRev: Rev | null;
+  readonly actualRev: Rev | null;
+}
 export interface NativeBranchState {
   readonly base: string;
   readonly owner: string;

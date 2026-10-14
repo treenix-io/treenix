@@ -1,26 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import { R,W,type Node,type WriteActionContext } from '@treenx/core/kernel/types';
+import { R, W, type Node, type WriteActionContext } from '@treenx/core/kernel/types';
 import { componentEntries } from '@treenx/core/kernel/migrate';
 import { z } from 'zod/v3';
 import type {
-AiAgent,
-AiAssignment,
-AiChat,AiPool,
-AiRun,
-AiRunStatus,
-AiThread
+  AiAgent,
+  AiAssignment,
+  AiChat,
+  AiPool,
+  AiRun,
+  AiRunStatus,
+  AiThread,
 } from '#agent/types';
 import { patchAgentComponent } from '#agent/native-chat';
 import {
-poolAgents,
-optionalPoolNode,
-poolNode,
-poolPrompt,
-taskAgent,
-taskMode,
-type PoolConfig
+  poolAgents,
+  optionalPoolNode,
+  poolNode,
+  poolPrompt,
+  taskAgent,
+  taskMode,
+  type PoolConfig,
 } from '#agent/native-pool';
 import { stageNativeBranchControl } from '#branch/native-actions';
 

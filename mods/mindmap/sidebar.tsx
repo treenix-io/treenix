@@ -1,8 +1,8 @@
 // Mind map sidebar — shows selected node details
 // Lightweight panel: path, type, components, fields, actions
 
-import { useTreeEffects,usePath } from '@treenx/react';
-import { getActions,getComponents,getPlainFields } from '@treenx/react/mods/editor-ui/node-utils';
+import { useTreeEffects, usePath } from '@treenx/react';
+import { getActions, getComponents, getPlainFields } from '@treenx/react/mods/editor-ui/node-utils';
 import { useNativeTypeDescription } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
 
@@ -27,7 +27,9 @@ export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
       <div className="mm-sidebar">
         <div className="mm-sidebar-header">
           <span className="text-muted-foreground">Loading...</span>
-          <Button variant="ghost" size="sm" className="mm-btn" onClick={onClose}>&times;</Button>
+          <Button variant="ghost" size="sm" className="mm-btn" onClick={onClose}>
+            &times;
+          </Button>
         </div>
       </div>
     );
@@ -50,7 +52,9 @@ export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
           </span>
           <span className="text-[11px] text-muted-foreground truncate">{path}</span>
         </div>
-        <Button variant="ghost" size="sm" className="mm-btn shrink-0" onClick={onClose}>&times;</Button>
+        <Button variant="ghost" size="sm" className="mm-btn shrink-0" onClick={onClose}>
+          &times;
+        </Button>
       </div>
 
       <div className="mm-sidebar-body">
@@ -112,7 +116,7 @@ export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
           <div className="mm-section">
             <div className="mm-section-label">Actions</div>
             <div className="flex flex-wrap gap-1">
-              {actions.map(a => (
+              {actions.map((a) => (
                 <Button
                   key={a}
                   variant="ghost"

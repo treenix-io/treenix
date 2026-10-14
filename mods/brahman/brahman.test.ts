@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe,it } from 'node:test';
-import { buildReplyMarkup,checkTags,formatTString,renderTemplate } from './helpers';
+import { describe, it } from 'node:test';
+import { buildReplyMarkup, checkTags, formatTString, renderTemplate } from './helpers';
 import type { MenuRow } from './types';
 
 describe('brahman template engine', () => {
@@ -26,10 +26,7 @@ describe('brahman template engine', () => {
   });
 
   it('renderTemplate: dot-path', () => {
-    assert.equal(
-      renderTemplate('{user.firstName}', { user: { firstName: 'Test' } }),
-      'Test',
-    );
+    assert.equal(renderTemplate('{user.firstName}', { user: { firstName: 'Test' } }), 'Test');
   });
 
   it('renderTemplate: ifEquals', () => {
@@ -91,12 +88,14 @@ describe('brahman checkTags', () => {
 });
 
 describe('brahman buildReplyMarkup', () => {
-  const rows: MenuRow[] = [{
-    buttons: [
-      { id: 1, title: { en: 'Btn1' }, action: { type: 'brahman.action.page', target: '/p1' } },
-      { id: 2, title: { en: 'Btn2' }, url: 'https://example.com' },
-    ],
-  }];
+  const rows: MenuRow[] = [
+    {
+      buttons: [
+        { id: 1, title: { en: 'Btn1' }, action: { type: 'brahman.action.page', target: '/p1' } },
+        { id: 2, title: { en: 'Btn2' }, url: 'https://example.com' },
+      ],
+    },
+  ];
 
   it('none returns undefined', () => {
     assert.equal(buildReplyMarkup(rows, 'none', 'en'), undefined);
@@ -123,12 +122,14 @@ describe('brahman buildReplyMarkup', () => {
   });
 
   it('filters by tags', () => {
-    const taggedRows: MenuRow[] = [{
-      buttons: [
-        { id: 1, title: { en: 'Admin only' }, tags: ['admin'] },
-        { id: 2, title: { en: 'Public' } },
-      ],
-    }];
+    const taggedRows: MenuRow[] = [
+      {
+        buttons: [
+          { id: 1, title: { en: 'Admin only' }, tags: ['admin'] },
+          { id: 2, title: { en: 'Public' } },
+        ],
+      },
+    ];
     // non-admin: only Public button should remain
     const r = buildReplyMarkup(taggedRows, 'keyboard', 'en', []) as any;
     assert.ok(r.reply_markup);

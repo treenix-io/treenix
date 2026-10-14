@@ -5,9 +5,10 @@ import { buildNodeLinkHref, getNodeLinkPath } from './node-link-click';
 describe('getNodeLinkPath', () => {
   it('returns the closest node-link path', () => {
     const target = {
-      closest: (selector: string) => selector === 'a[data-node-path]'
-        ? { getAttribute: (name: string) => name === 'data-node-path' ? '/docs/intro' : null }
-        : null,
+      closest: (selector: string) =>
+        selector === 'a[data-node-path]'
+          ? { getAttribute: (name: string) => (name === 'data-node-path' ? '/docs/intro' : null) }
+          : null,
     };
 
     assert.equal(getNodeLinkPath(target), '/docs/intro');
@@ -27,7 +28,10 @@ describe('getNodeLinkPath', () => {
 
 describe('buildNodeLinkHref', () => {
   it('keeps editor root query when navigating inside /t', () => {
-    assert.equal(buildNodeLinkHref('/docs/target', '/t/docs/source', '?root=%2Fdocs'), '/t/docs/target?root=%2Fdocs');
+    assert.equal(
+      buildNodeLinkHref('/docs/target', '/t/docs/source', '?root=%2Fdocs'),
+      '/t/docs/target?root=%2Fdocs',
+    );
   });
 
   it('uses /v prefix in direct view mode', () => {

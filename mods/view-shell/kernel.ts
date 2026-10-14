@@ -7,7 +7,14 @@ import schema0 from './schemas/t.view.shell.json' with { type: 'json' };
 export const manifest: ModuleManifest = {
   id: '@treenx/view-shell',
   types: [
-    { name: 't.view.shell', module: '@treenx/view-shell', security: 'ordinary', version: 0, schema: schema0, actions: {} },
+    {
+      name: 't.view.shell',
+      module: '@treenx/view-shell',
+      security: 'ordinary',
+      version: 0,
+      schema: schema0,
+      actions: {},
+    },
   ],
   security: [],
   open: [],
@@ -15,5 +22,8 @@ export const manifest: ModuleManifest = {
 
 /** Publish the existing viewer route schema through native module discovery. */
 export default function createNativeModule(): NativeModuleDeployment {
-  return { manifest, seeds: nativeSeed('view-shell', seedNodes, [{ $path: '/sys/routes', $type: 't.dir' }]) };
+  return {
+    manifest,
+    seeds: nativeSeed('view-shell', seedNodes, [{ $path: '/sys/routes', $type: 't.dir' }]),
+  };
 }

@@ -60,10 +60,10 @@ const SensorFeed: View<SensorDemo> = ({ ctx }) => {
       </div>
     </div>
   );
-}
+};
 
 export const clientModules = [
   declareClientModule('@treenx/mods/sensor-demo/react', [
-    declareView(SensorDemo, 'react', SensorFeed)
-  ])
+    declareView(SensorDemo, 'react', SensorFeed),
+  ]),
 ];

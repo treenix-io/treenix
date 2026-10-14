@@ -77,7 +77,10 @@ describe('serializeFrontmatter', () => {
       order: 1,
       tags: ['a', 'b'],
     });
-    assert.equal(out, '---\ntitle: T\ndescription: D\nsection: root\norder: 1\ntags: [a, b]\n---\n\n');
+    assert.equal(
+      out,
+      '---\ntitle: T\ndescription: D\nsection: root\norder: 1\ntags: [a, b]\n---\n\n',
+    );
   });
 
   it('quotes strings that contain special chars', () => {

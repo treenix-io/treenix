@@ -1,29 +1,40 @@
 // Agent Office tests — types (state machine) + guardian (policy registry)
 
-import { createNode,getComponent,compKey } from '@treenx/core';
+import { createNode, getComponent, compKey } from '@treenx/core';
 import { createInstance } from '../../core/src/kernel/instance';
 import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
 import { createMemoryStore } from '@treenx/core/kernel/store/memory';
 import type { Position } from '@treenx/core/kernel/types';
 import { nativeAgentTypes } from './native-manifest';
 import assert from 'node:assert/strict';
-import { after,before,describe,it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 import './types';
-import { buildPermissionRules,classifyBashCommand,resolveVerdict,splitBashParts } from './guardian';
 import {
-AiAgent,
-AiAssignment,
-AiCost,
-AiLog,
-AiPlan,
-AiPolicy,
-AiPool,
-AiRun,
-AiRunStatus,type ThreadMessage
+  buildPermissionRules,
+  classifyBashCommand,
+  resolveVerdict,
+  splitBashParts,
+} from './guardian';
+import {
+  AiAgent,
+  AiAssignment,
+  AiCost,
+  AiLog,
+  AiPlan,
+  AiPolicy,
+  AiPool,
+  AiRun,
+  AiRunStatus,
+  type ThreadMessage,
 } from './types';
 
-const manifest = { id: 'agent-contract', types: nativeAgentTypes('agent-contract'), security: [], open: [] };
+const manifest = {
+  id: 'agent-contract',
+  types: nativeAgentTypes('agent-contract'),
+  security: [],
+  open: [],
+};
 let instance: Awaited<ReturnType<typeof createInstance>>;
 let commands: ReturnType<typeof instance.commands>;
 let sequence = 0;
@@ -31,13 +42,32 @@ let sequence = 0;
 before(async () => {
   const root = createMemoryStore({ domain: 'agent-contract' });
   let saved: Position | undefined;
-  instance = await createInstance({ id: 'agent-contract', root: { kind: 'store', store: root },
-    modules: [manifest], blobs: createMemoryBlobStore(), provisioning: {
-      writerEpoch: 1, credentialTtlMs: 60_000,
-      counter: { async load() { return saved; }, async save(value) { saved = value; }, async freshEpoch(floor) { return floor + 1; } },
+  instance = await createInstance({
+    id: 'agent-contract',
+    root: { kind: 'store', store: root },
+    modules: [manifest],
+    blobs: createMemoryBlobStore(),
+    provisioning: {
+      writerEpoch: 1,
+      credentialTtlMs: 60_000,
+      counter: {
+        async load() {
+          return saved;
+        },
+        async save(value) {
+          saved = value;
+        },
+        async freshEpoch(floor) {
+          return floor + 1;
+        },
+      },
       domains: [{ store: root, epoch: 'agent-contract1', persistent: false }],
-      bootstrap: { kind: 'fresh', admin: { path: '/admin', name: 'admin', password: 'agent-contract-password' } },
-    } });
+      bootstrap: {
+        kind: 'fresh',
+        admin: { path: '/admin', name: 'admin', password: 'agent-contract-password' },
+      },
+    },
+  });
   assert.ok(instance.setupCredential);
   commands = instance.commands(await instance.auth.openCredential(instance.setupCredential));
 });
@@ -45,13 +75,27 @@ before(async () => {
 after(() => instance.close());
 
 /** Exercise the real native draft and copy its accepted data back to the existing fixture assertions. */
-async function callAction(node: ReturnType<typeof createNode>, action: string, args: unknown = {}, component?: string) {
+async function callAction(
+  node: ReturnType<typeof createNode>,
+  action: string,
+  args: unknown = {},
+  component?: string,
+) {
   // The fixture copies accepted nodes back for assertions; writes omit issued metadata.
   const { $owner, $id, $rev, ...input } = node;
-  const key = () => ({ epoch: instance.writer.intake.epoch, time: Date.now(), nonce: String(++sequence) });
+  const key = () => ({
+    epoch: instance.writer.intake.epoch,
+    time: Date.now(),
+    nonce: String(++sequence),
+  });
   await commands.commit({ opId: key(), changes: [{ op: 'put', node: input }] });
-  await commands.act({ path: node.$path, action, args, opId: key(),
-    ...(component === undefined ? {} : { component: compKey(component) }) });
+  await commands.act({
+    path: node.$path,
+    action,
+    args,
+    opId: key(),
+    ...(component === undefined ? {} : { component: compKey(component) }),
+  });
   const accepted = await instance.source.node(node.$path);
   assert.ok(accepted);
   if (component === undefined) Object.assign(node, accepted);
@@ -63,8 +107,14 @@ async function callAction(node: ReturnType<typeof createNode>, action: string, a
 describe('AiAgent', () => {
   function makeAgent(overrides?: Partial<AiAgent>) {
     return createNode('/agents/test', 'ai.agent', {
-      model: 'claude-opus-4-6', systemPrompt: '', role: 'qa', status: 'offline', currentTask: '', currentRun: '',
-      lastRunAt: 0, totalTokens: 0,
+      model: 'claude-opus-4-6',
+      systemPrompt: '',
+      role: 'qa',
+      status: 'offline',
+      currentTask: '',
+      currentRun: '',
+      lastRunAt: 0,
+      totalTokens: 0,
       ...overrides,
     });
   }
@@ -83,7 +133,10 @@ describe('AiAgent', () => {
 
   it('offline() throws when working', async () => {
     const node = makeAgent({ status: 'working' });
-    await assert.rejects(() => callAction(node, 'offline'), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(
+      () => callAction(node, 'offline'),
+      (e: Error) => e.message.includes('cannot'),
+    );
   });
 
   it('assign() transitions idle → working with task', async () => {
@@ -95,12 +148,18 @@ describe('AiAgent', () => {
 
   it('assign() throws when not idle', async () => {
     const node = makeAgent({ status: 'working' });
-    await assert.rejects(() => callAction(node, 'assign', { task: '/board/data/x' }), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(
+      () => callAction(node, 'assign', { task: '/board/data/x' }),
+      (e: Error) => e.message.includes('cannot'),
+    );
   });
 
   it('assign() throws on empty task', async () => {
     const node = makeAgent({ status: 'idle' });
-    await assert.rejects(() => callAction(node, 'assign', { task: '' }), (e: Error) => e.message.includes('task'));
+    await assert.rejects(
+      () => callAction(node, 'assign', { task: '' }),
+      (e: Error) => e.message.includes('task'),
+    );
   });
 
   it('complete() transitions working → idle', async () => {
@@ -113,7 +172,10 @@ describe('AiAgent', () => {
 
   it('complete() throws when not working', async () => {
     const node = makeAgent({ status: 'idle' });
-    await assert.rejects(() => callAction(node, 'complete'), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(
+      () => callAction(node, 'complete'),
+      (e: Error) => e.message.includes('cannot'),
+    );
   });
 
   it('block() sets status to blocked', async () => {
@@ -131,7 +193,10 @@ describe('AiAgent', () => {
 
   it('declares all expected native actions', () => {
     for (const action of ['online', 'offline', 'assign', 'complete', 'block', 'fail']) {
-      assert.ok(manifest.types.find(type => type.name === 'ai.agent')!.actions[action], `missing action:${action}`);
+      assert.ok(
+        manifest.types.find((type) => type.name === 'ai.agent')!.actions[action],
+        `missing action:${action}`,
+      );
     }
   });
 });
@@ -141,7 +206,7 @@ describe('AiAgent', () => {
 describe('AiThread', () => {
   it('post() action adds message', async () => {
     const node = createNode('/tasks/t1', 'ai.thread', { messages: [] as ThreadMessage[] });
-    assert.ok(manifest.types.find(type => type.name === 'ai.thread')!.actions.post);
+    assert.ok(manifest.types.find((type) => type.name === 'ai.thread')!.actions.post);
     await callAction(node, 'post', { role: 'qa', from: '/agents/qa', text: 'looks good' });
     assert.equal(node.messages.length, 1);
     assert.equal(node.messages[0].role, 'qa');
@@ -162,10 +227,10 @@ describe('AiThread', () => {
 describe('Guardian', () => {
   it('buildPermissionRules produces ask-once and allow rules from fallback', () => {
     const rules = buildPermissionRules('any-role');
-    assert.ok(rules.some(r => r.policy === 'ask-once'));
-    assert.ok(rules.some(r => r.policy === 'allow'));
-    assert.ok(rules.some(r => r.tool === 'mcp__treenix__remove_node' && r.policy === 'ask-once'));
-    assert.ok(rules.some(r => r.tool === 'mcp__treenix__get_node' && r.policy === 'allow'));
+    assert.ok(rules.some((r) => r.policy === 'ask-once'));
+    assert.ok(rules.some((r) => r.policy === 'allow'));
+    assert.ok(rules.some((r) => r.tool === 'mcp__treenix__remove_node' && r.policy === 'ask-once'));
+    assert.ok(rules.some((r) => r.tool === 'mcp__treenix__get_node' && r.policy === 'allow'));
   });
 });
 
@@ -248,7 +313,10 @@ describe('splitBashParts', () => {
   });
 
   it('respects double quotes', () => {
-    assert.deepEqual(splitBashParts('echo "hello | world" | head'), ['echo "hello | world"', 'head']);
+    assert.deepEqual(splitBashParts('echo "hello | world" | head'), [
+      'echo "hello | world"',
+      'head',
+    ]);
   });
 
   it('respects single quotes', () => {
@@ -275,13 +343,25 @@ describe('splitBashParts', () => {
 // ── Fail-closed: wildcards never grant mutations (core-1prz) ──
 
 describe('fail-closed mutating verdicts (core-1prz)', () => {
-
   it('tool-segment wildcard allow does not grant mutating tools', () => {
     const p = { allow: ['mcp__treenix__*'], deny: [], escalate: [] };
     assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']), null);
-    assert.equal(resolveVerdict(p, ['mcp__treenix__remove_node:/x', 'mcp__treenix__remove_node']), null);
-    assert.equal(resolveVerdict(p, ['mcp__treenix__execute:run:/x', 'mcp__treenix__execute:run', 'mcp__treenix__execute']), null);
-    assert.equal(resolveVerdict(p, ['mcp__treenix__get_node:/x', 'mcp__treenix__get_node']), 'allow');
+    assert.equal(
+      resolveVerdict(p, ['mcp__treenix__remove_node:/x', 'mcp__treenix__remove_node']),
+      null,
+    );
+    assert.equal(
+      resolveVerdict(p, [
+        'mcp__treenix__execute:run:/x',
+        'mcp__treenix__execute:run',
+        'mcp__treenix__execute',
+      ]),
+      null,
+    );
+    assert.equal(
+      resolveVerdict(p, ['mcp__treenix__get_node:/x', 'mcp__treenix__get_node']),
+      'allow',
+    );
   });
 
   it('bare * grants reads only', () => {
@@ -292,14 +372,34 @@ describe('fail-closed mutating verdicts (core-1prz)', () => {
 
   it('wildcard allow + explicit escalate → mutation escalates', () => {
     const p = { allow: ['mcp__treenix__*'], deny: [], escalate: ['mcp__treenix__set_node'] };
-    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']), 'escalate');
+    assert.equal(
+      resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']),
+      'escalate',
+    );
   });
 
   it('tool-literal allows still grant — scoping by path/action stays free', () => {
-    const p = { allow: ['mcp__treenix__set_node:/branches/*', 'mcp__treenix__execute:*'], deny: [], escalate: [] };
-    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/branches/b1', 'mcp__treenix__set_node']), 'allow');
-    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/live/x', 'mcp__treenix__set_node']), null);
-    assert.equal(resolveVerdict(p, ['mcp__treenix__execute:run:/x', 'mcp__treenix__execute:run', 'mcp__treenix__execute']), 'allow');
+    const p = {
+      allow: ['mcp__treenix__set_node:/branches/*', 'mcp__treenix__execute:*'],
+      deny: [],
+      escalate: [],
+    };
+    assert.equal(
+      resolveVerdict(p, ['mcp__treenix__set_node:/branches/b1', 'mcp__treenix__set_node']),
+      'allow',
+    );
+    assert.equal(
+      resolveVerdict(p, ['mcp__treenix__set_node:/live/x', 'mcp__treenix__set_node']),
+      null,
+    );
+    assert.equal(
+      resolveVerdict(p, [
+        'mcp__treenix__execute:run:/x',
+        'mcp__treenix__execute:run',
+        'mcp__treenix__execute',
+      ]),
+      'allow',
+    );
   });
 });
 
@@ -308,7 +408,13 @@ describe('fail-closed mutating verdicts (core-1prz)', () => {
 describe('AiPlan', () => {
   it('approvePlan sets approved flag', async () => {
     const node = createNode('/board/data/t1', 't.dir', undefined, {
-      plan: { $type: 'ai.plan', text: 'Step 1: do X\nStep 2: do Y', approved: false, feedback: '', createdAt: Date.now() },
+      plan: {
+        $type: 'ai.plan',
+        text: 'Step 1: do X\nStep 2: do Y',
+        approved: false,
+        feedback: '',
+        createdAt: Date.now(),
+      },
     });
     const plan = getComponent(node, AiPlan)!;
     assert.ok(plan);
@@ -320,7 +426,13 @@ describe('AiPlan', () => {
 
   it('approvePlan with feedback', async () => {
     const node = createNode('/board/data/t1', 't.dir', undefined, {
-      plan: { $type: 'ai.plan', text: 'Some plan', approved: false, feedback: '', createdAt: Date.now() },
+      plan: {
+        $type: 'ai.plan',
+        text: 'Some plan',
+        approved: false,
+        feedback: '',
+        createdAt: Date.now(),
+      },
     });
     const plan = getComponent(node, AiPlan)!;
     await callAction(node, 'approvePlan', { feedback: 'Also handle edge case X' }, 'plan');
@@ -330,7 +442,13 @@ describe('AiPlan', () => {
 
   it('rejectPlan keeps text for re-planning and saves feedback', async () => {
     const node = createNode('/board/data/t1', 't.dir', undefined, {
-      plan: { $type: 'ai.plan', text: 'Bad plan', approved: false, feedback: '', createdAt: Date.now() },
+      plan: {
+        $type: 'ai.plan',
+        text: 'Bad plan',
+        approved: false,
+        feedback: '',
+        createdAt: Date.now(),
+      },
     });
     const plan = getComponent(node, AiPlan)!;
     await callAction(node, 'rejectPlan', { feedback: 'Too risky, simplify' }, 'plan');
@@ -343,7 +461,7 @@ describe('AiPlan', () => {
     const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: '', approved: false, feedback: '', createdAt: 0 },
     });
-    
+
     await assert.rejects(
       () => callAction(node, 'approvePlan', {}, 'plan'),
       (e: Error) => e.message.includes('no plan'),
@@ -366,7 +484,11 @@ describe('AiPool', () => {
 
 describe('AiAssignment', () => {
   it('creates with defaults', () => {
-    const node = createNode('/tasks/t1', 'ai.assignment', { origin: '/agents/ceo', nextRoles: ['dev', 'qa'], cursors: {} });
+    const node = createNode('/tasks/t1', 'ai.assignment', {
+      origin: '/agents/ceo',
+      nextRoles: ['dev', 'qa'],
+      cursors: {},
+    });
     const asgn = getComponent(node, AiAssignment)!;
     assert.equal(asgn.origin, '/agents/ceo');
     assert.deepEqual(asgn.nextRoles, ['dev', 'qa']);
@@ -377,13 +499,33 @@ describe('AiAssignment', () => {
 
 describe('AiRun', () => {
   it('creates with ECS components', () => {
-    const node = createNode('/agents/qa/runs/r-1', 'ai.run', {
-      prompt: 'Fix the bug', result: '', mode: 'work', taskRef: '/board/data/task-1',
-    }, {
-      log: { $type: 'ai.log', entries: [] },
-      'run-status': { $type: 'ai.run-status', status: 'pending', startedAt: 0, finishedAt: 0, error: '' },
-      cost: { $type: 'ai.cost', inputTokens: 0, outputTokens: 0, costUsd: 0, model: 'claude-sonnet-4-20250514' },
-    });
+    const node = createNode(
+      '/agents/qa/runs/r-1',
+      'ai.run',
+      {
+        prompt: 'Fix the bug',
+        result: '',
+        mode: 'work',
+        taskRef: '/board/data/task-1',
+      },
+      {
+        log: { $type: 'ai.log', entries: [] },
+        'run-status': {
+          $type: 'ai.run-status',
+          status: 'pending',
+          startedAt: 0,
+          finishedAt: 0,
+          error: '',
+        },
+        cost: {
+          $type: 'ai.cost',
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-20250514',
+        },
+      },
+    );
 
     const run = getComponent(node, AiRun)!;
     assert.equal(run.prompt, 'Fix the bug');
@@ -404,7 +546,9 @@ describe('AiRun', () => {
 describe('AiPolicy', () => {
   it('creates with empty rule lists', () => {
     const node = createNode('/guardian', 'ai.policy', {
-      allow: [], deny: [], escalate: [],
+      allow: [],
+      deny: [],
+      escalate: [],
     });
     const g = getComponent(node, AiPolicy)!;
     assert.deepEqual(g.allow, []);
@@ -414,7 +558,7 @@ describe('AiPolicy', () => {
 
   it('addAllow action appends rule', async () => {
     const node = createNode('/guardian', 'ai.policy', { allow: [], deny: [], escalate: [] });
-    assert.ok(manifest.types.find(type => type.name === 'ai.policy')!.actions.addAllow);
+    assert.ok(manifest.types.find((type) => type.name === 'ai.policy')!.actions.addAllow);
     await callAction(node, 'addAllow', { pattern: 'mcp__treenix__*' });
     assert.deepEqual(node.allow, ['mcp__treenix__*']);
   });
@@ -433,7 +577,9 @@ describe('AiPolicy', () => {
 
   it('removeRule action removes from correct list', async () => {
     const node = createNode('/guardian', 'ai.policy', {
-      allow: ['mcp__treenix__*'], deny: ['rm -rf'], escalate: ['git push'],
+      allow: ['mcp__treenix__*'],
+      deny: ['rm -rf'],
+      escalate: ['git push'],
     });
     await callAction(node, 'removeRule', { pattern: 'rm -rf' });
     assert.deepEqual(node.deny, []);

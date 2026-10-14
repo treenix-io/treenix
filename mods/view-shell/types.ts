@@ -5,8 +5,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // 'react'). Mounted at /sys/routes/v with a wildcard so /v/anything resolves
 // here.
 
-
-
 /** Read-only viewer route node. */
 export class ViewShell {
   /** When true, keep the viewed target live via the client tree event stream. */
@@ -15,6 +13,6 @@ export class ViewShell {
 
 const declaredTViewShell = declareClientType('t.view.shell', ViewShell);
 
-export const clientModules = [declareOpenModule('@treenx/mods/view-shell/types', [], [
-  declaredTViewShell,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/view-shell/types', [], [declaredTViewShell]),
+];

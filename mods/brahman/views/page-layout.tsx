@@ -5,37 +5,37 @@ import type { PresentationNode } from '@treenx/react/tree/presentation';
 // so data must be on the node, not nested in node.page.
 
 import {
-closestCenter,
-DndContext,
-type DragEndEvent,
-KeyboardSensor,
-PointerSensor,
-useSensor,
-useSensors,
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
 } from '@dnd-kit/core';
 import {
-arrayMove,
-SortableContext,
-sortableKeyboardCoordinates,
-useSortable,
-verticalListSortingStrategy,
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@treenx/react/ui/button';
 import {
-DropdownMenu,
-DropdownMenuContent,
-DropdownMenuItem,
-DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from '@treenx/react/ui/dropdown-menu';
 import { Input } from '@treenx/react/ui/input';
-import { Render,type View } from '@treenx/react';
-import { useTreeEffects,useChildren,useNavigate,useSave } from '@treenx/react';
+import { Render, type View } from '@treenx/react';
+import { useTreeEffects, useChildren, useNavigate, useSave } from '@treenx/react';
 import type { PageConfig } from '../types';
-import { ChevronDown,ChevronRight,GripVertical,Plus,Trash2 } from 'lucide-react';
-import { useCallback,useEffect,useState } from 'react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { ACTION_TYPES } from '../types';
-import { actionIcon,actionSummary } from './action-cards';
+import { actionIcon, actionSummary } from './action-cards';
 
 // ── Action palette dropdown ──
 
@@ -43,11 +43,17 @@ function ActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
   const [filter, setFilter] = useState('');
   const q = filter.trim().toLowerCase();
   const items = q
-    ? ACTION_TYPES.filter(at => at.label.toLowerCase().includes(q) || at.type.toLowerCase().includes(q))
+    ? ACTION_TYPES.filter(
+        (at) => at.label.toLowerCase().includes(q) || at.type.toLowerCase().includes(q),
+      )
     : ACTION_TYPES;
 
   return (
-    <DropdownMenu onOpenChange={(open) => { if (!open) setFilter(''); }}>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (!open) setFilter('');
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm">
           <Plus className="h-4 w-4 mr-1" /> Add action
@@ -58,8 +64,8 @@ function ActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
           <Input
             autoFocus
             value={filter}
-            onChange={e => setFilter(e.target.value)}
-            onKeyDown={e => e.stopPropagation()}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
             placeholder="Filter..."
             className="h-7 text-sm"
           />
@@ -67,16 +73,18 @@ function ActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
         <div className="py-1 max-h-180 overflow-y-auto">
           {items.length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted-foreground">No matches</div>
-          ) : items.map(at => (
-            <DropdownMenuItem
-              key={at.type}
-              onSelect={() => onSelect(at.type)}
-              className="flex items-center gap-2"
-            >
-              {actionIcon(at.type)}
-              {at.label}
-            </DropdownMenuItem>
-          ))}
+          ) : (
+            items.map((at) => (
+              <DropdownMenuItem
+                key={at.type}
+                onSelect={() => onSelect(at.type)}
+                className="flex items-center gap-2"
+              >
+                {actionIcon(at.type)}
+                {at.label}
+              </DropdownMenuItem>
+            ))
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -98,7 +106,9 @@ function SortableAction({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: node.$path });
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: node.$path,
+  });
 
   return (
     <div
@@ -107,25 +117,28 @@ function SortableAction({
       className="bg-card border border-border rounded-md group hover:border-primary/50"
     >
       {/* Header row */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer"
-        onClick={onToggle}
-      >
-        <div {...attributes} {...listeners} className="cursor-grab text-muted-foreground hover:text-foreground"
-          onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-2 px-3 py-2 cursor-pointer" onClick={onToggle}>
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab text-muted-foreground hover:text-foreground"
+          onClick={(e) => e.stopPropagation()}
+        >
           <GripVertical className="h-4 w-4" />
         </div>
 
         <div className="text-muted-foreground">
-          {expanded
-            ? <ChevronDown className="h-3.5 w-3.5" />
-            : <ChevronRight className="h-3.5 w-3.5" />}
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {actionIcon(node.$type)}
           <span className="text-xs font-medium text-muted-foreground uppercase">
-            {ACTION_TYPES.find(a => a.type === node.$type)?.label ?? node.$type.split('.').at(-1)}
+            {ACTION_TYPES.find((a) => a.type === node.$type)?.label ?? node.$type.split('.').at(-1)}
           </span>
           {!expanded && (
             <span className="text-sm truncate text-foreground/60">{actionSummary(node)}</span>
@@ -136,7 +149,10 @@ function SortableAction({
           variant="ghost"
           size="sm"
           className="p-0 h-auto text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100"
-          onClick={e => { e.stopPropagation(); onSelect(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
           title="Select in tree"
         >
           &#8599;
@@ -146,7 +162,10 @@ function SortableAction({
           variant="ghost"
           size="sm"
           className="p-0 h-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-          onClick={e => { e.stopPropagation(); onRemove(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
@@ -180,18 +199,27 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
   const save = useSave(node.$path, { autoSave: true, delay: 400 });
 
   // Sync local state when node changes externally
-  useEffect(() => { setLocalCommand(command); }, [command]);
+  useEffect(() => {
+    setLocalCommand(command);
+  }, [command]);
 
-  const saveNode = useCallback((patch: Record<string, unknown>) => {
-    // Strip any leftover 'page' component that shouldn't exist
-    save.onChange(Object.hasOwn(save.value ?? node, 'page') ? { page: undefined, ...patch } : patch);
-  }, [save.onChange, save.value, node]);
+  const saveNode = useCallback(
+    (patch: Record<string, unknown>) => {
+      // Strip any leftover 'page' component that shouldn't exist
+      save.onChange(
+        Object.hasOwn(save.value ?? node, 'page') ? { page: undefined, ...patch } : patch,
+      );
+    },
+    [save.onChange, save.value, node],
+  );
 
   // Sort children by positions, append any untracked
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
-    ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
+    ...positions
+      .map((p) => children.find((c) => c.$path === p))
+      .filter((c): c is PresentationNode => !!c),
+    ...children.filter((c) => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 
   const sensors = useSensors(
@@ -202,10 +230,14 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = sorted.findIndex(c => c.$path === active.id);
-    const newIndex = sorted.findIndex(c => c.$path === over.id);
+    const oldIndex = sorted.findIndex((c) => c.$path === active.id);
+    const newIndex = sorted.findIndex((c) => c.$path === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
-    const reordered = arrayMove(sorted.map(c => c.$path), oldIndex, newIndex);
+    const reordered = arrayMove(
+      sorted.map((c) => c.$path),
+      oldIndex,
+      newIndex,
+    );
     saveNode({ positions: reordered });
   }
 
@@ -224,7 +256,7 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
 
   async function removeAction(path: string) {
     await removeNode(path);
-    saveNode({ positions: positions.filter(p => p !== path) });
+    saveNode({ positions: positions.filter((p) => p !== path) });
   }
 
   function selectAction(path: string) {
@@ -240,13 +272,13 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
           className="flex-1 font-mono"
           placeholder="/command..."
           value={localCommand}
-          onChange={e => {
+          onChange={(e) => {
             setLocalCommand(e.target.value);
             saveNode({ command: e.target.value });
           }}
           onBlur={() => {
             // Flush pending save on blur
-            save.flush().catch(error => console.error('[brahman] command save failed:', error));
+            save.flush().catch((error) => console.error('[brahman] command save failed:', error));
           }}
         />
       </div>
@@ -258,21 +290,26 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
         </div>
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={sorted.map(c => c.$path)} strategy={verticalListSortingStrategy}>
+          <SortableContext
+            items={sorted.map((c) => c.$path)}
+            strategy={verticalListSortingStrategy}
+          >
             <div className="space-y-1">
-              {sorted.map(child => (
+              {sorted.map((child) => (
                 <SortableAction
                   key={child.$path}
                   node={child}
                   onRemove={() => removeAction(child.$path)}
                   onSelect={() => selectAction(child.$path)}
                   expanded={!collapsed.has(child.$path)}
-                  onToggle={() => setCollapsed(prev => {
-                    const next = new Set(prev);
-                    if (next.has(child.$path)) next.delete(child.$path);
-                    else next.add(child.$path);
-                    return next;
-                  })}
+                  onToggle={() =>
+                    setCollapsed((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(child.$path)) next.delete(child.$path);
+                      else next.add(child.$path);
+                      return next;
+                    })
+                  }
                 />
               ))}
             </div>
@@ -289,4 +326,4 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
       <ActionPalette onSelect={addAction} />
     </div>
   );
-}
+};

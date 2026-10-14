@@ -1,4 +1,4 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // MindMap View — Miro-style horizontal tree with organic curves
 // Each node fetches its own children via useChildren when expanded
 
@@ -7,16 +7,24 @@ import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
-import { zoom as d3zoom,type D3ZoomEvent,type ZoomBehavior,zoomIdentity } from 'd3-zoom';
-import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
-import { type EditingAt,MindMapBranch,MindMapCtx,type MindMapState } from './branch';
+import { zoom as d3zoom, type D3ZoomEvent, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type EditingAt, MindMapBranch, MindMapCtx, type MindMapState } from './branch';
 import { MindMapSidebar } from './sidebar';
 import type { MindMapConfig } from './types';
 import './mindmap.css';
 
 const PALETTE = [
-  '#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6',
-  '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#84cc16',
+  '#6366f1',
+  '#f59e0b',
+  '#10b981',
+  '#ef4444',
+  '#8b5cf6',
+  '#06b6d4',
+  '#f97316',
+  '#ec4899',
+  '#14b8a6',
+  '#84cc16',
 ];
 
 const LEVEL_W = 200;
@@ -54,7 +62,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => {
+    const ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       setDims({ w: width, h: height });
     });
@@ -69,13 +77,17 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
     const zoomBehavior = d3zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
-      .on('zoom', (event: D3ZoomEvent<SVGSVGElement, unknown>) => g.attr('transform', event.transform.toString()));
+      .on('zoom', (event: D3ZoomEvent<SVGSVGElement, unknown>) =>
+        g.attr('transform', event.transform.toString()),
+      );
 
     svg.call(zoomBehavior);
     svg.call(zoomBehavior.transform, zoomIdentity.translate(dims.w / 2, dims.h / 2).scale(0.85));
     zoomRef.current = zoomBehavior;
 
-    return () => { svg.on('.zoom', null); };
+    return () => {
+      svg.on('.zoom', null);
+    };
   }, [dims.w, dims.h]);
 
   const fitView = useCallback(() => {
@@ -85,18 +97,22 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
     if (!bounds.width || !bounds.height) return;
 
     const pad = 60;
-    const scale = Math.min((dims.w - pad * 2) / bounds.width, (dims.h - pad * 2) / bounds.height, 1.5);
+    const scale = Math.min(
+      (dims.w - pad * 2) / bounds.width,
+      (dims.h - pad * 2) / bounds.height,
+      1.5,
+    );
     const tx = dims.w / 2 - (bounds.x + bounds.width / 2) * scale;
     const ty = dims.h / 2 - (bounds.y + bounds.height / 2) * scale;
 
-    svg.transition().duration(400).call(
-      zoomRef.current.transform,
-      zoomIdentity.translate(tx, ty).scale(scale),
-    );
+    svg
+      .transition()
+      .duration(400)
+      .call(zoomRef.current.transform, zoomIdentity.translate(tx, ty).scale(scale));
   }, [dims.w, dims.h]);
 
   const handleToggle = useCallback((path: string) => {
-    setExpanded(prev => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         for (const p of next) {
@@ -110,7 +126,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
   }, []);
 
   const handleSelect = useCallback((path: string) => {
-    setSelectedPath(prev => prev === path ? null : path);
+    setSelectedPath((prev) => (prev === path ? null : path));
   }, []);
 
   const handleCloseSidebar = useCallback(() => setSelectedPath(null), []);
@@ -120,32 +136,48 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, []);
 
-  const handleAddChild = useCallback((parentPath: string, side: 'left' | 'right', color: string) => {
-    setEditingAt({ parentPath, side, color });
-    setExpanded(prev => new Set([...prev, parentPath]));
-  }, []);
+  const handleAddChild = useCallback(
+    (parentPath: string, side: 'left' | 'right', color: string) => {
+      setEditingAt({ parentPath, side, color });
+      setExpanded((prev) => new Set([...prev, parentPath]));
+    },
+    [],
+  );
 
-  const handleCommitAdd = useCallback((parentPath: string, name: string) => {
-    const childPath = `${parentPath}/${name}`;
-    createNode(childPath, 'dir');
-    setEditingAt(null);
-  }, [createNode]);
+  const handleCommitAdd = useCallback(
+    (parentPath: string, name: string) => {
+      const childPath = `${parentPath}/${name}`;
+      createNode(childPath, 'dir');
+      setEditingAt(null);
+    },
+    [createNode],
+  );
 
   const handleCancelAdd = useCallback(() => setEditingAt(null), []);
 
-  const handleDelete = useCallback((path: string) => {
-    if (path === rootPath) return;
-    if (!confirm(`Delete ${basename(path)}?`)) return;
-    removeNode(path);
-    setSelectedPath(null);
-  }, [rootPath, removeNode]);
+  const handleDelete = useCallback(
+    (path: string) => {
+      if (path === rootPath) return;
+      if (!confirm(`Delete ${basename(path)}?`)) return;
+      removeNode(path);
+      setSelectedPath(null);
+    },
+    [rootPath, removeNode],
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'Enter' && selectedPath) { e.preventDefault(); handleToggle(selectedPath); }
+      if (e.key === 'Enter' && selectedPath) {
+        e.preventDefault();
+        handleToggle(selectedPath);
+      }
       if (e.key === 'Escape') setSelectedPath(null);
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPath && selectedPath !== rootPath) {
+      if (
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        selectedPath &&
+        selectedPath !== rootPath
+      ) {
         e.preventDefault();
         handleDelete(selectedPath);
       }
@@ -160,12 +192,27 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
   const mmState: MindMapState = useMemo(
     () => ({
-      expanded, selectedPath, editingAt,
-      onToggle: handleToggle, onSelect: handleSelect,
-      onAddChild: handleAddChild, onCommitAdd: handleCommitAdd, onCancelAdd: handleCancelAdd,
+      expanded,
+      selectedPath,
+      editingAt,
+      onToggle: handleToggle,
+      onSelect: handleSelect,
+      onAddChild: handleAddChild,
+      onCommitAdd: handleCommitAdd,
+      onCancelAdd: handleCancelAdd,
       onDelete: handleDelete,
     }),
-    [expanded, selectedPath, editingAt, handleToggle, handleSelect, handleAddChild, handleCommitAdd, handleCancelAdd, handleDelete],
+    [
+      expanded,
+      selectedPath,
+      editingAt,
+      handleToggle,
+      handleSelect,
+      handleAddChild,
+      handleCommitAdd,
+      handleCancelAdd,
+      handleDelete,
+    ],
   );
 
   const svgW = selectedPath ? dims.w - 280 : dims.w;
@@ -176,7 +223,14 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
       <div className="mm-tree-wrap">
         <div className="mm-toolbar">
           <button className="mm-btn" onClick={fitView} title="Fit view">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
             </svg>
           </button>
@@ -282,6 +336,6 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
 export const clientModules = [
   declareClientModule('@treenx/mods/mindmap/view', [
-    declareView('mindmap.map', 'react', MindMapView)
-  ])
+    declareView('mindmap.map', 'react', MindMapView),
+  ]),
 ];

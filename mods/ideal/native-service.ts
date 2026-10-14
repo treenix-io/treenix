@@ -1,13 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import type { ChangeMember, Node, NodeInput, OpId, Selector, ServiceRun, Session } from '@treenx/core/kernel';
+import type {
+  ChangeMember,
+  Node,
+  NodeInput,
+  OpId,
+  Selector,
+  ServiceRun,
+  Session,
+} from '@treenx/core/kernel';
 import type { IdeasBoard } from './types';
 
 /** Watches eligible ideas and commits their approval against the exact child selection read. */
 export async function nativeIdealService(node: Node, session: Session): Promise<ServiceRun> {
   const board = getComponent<IdeasBoard>(node, 'ideal.board');
-  if (board === undefined) throw new KernelError('INVALID', 'Ideal service node has no board component');
+  if (board === undefined)
+    throw new KernelError('INVALID', 'Ideal service node has no board component');
   const selector = {
     children: node.$path,
     where: { $type: 'ideal.idea', status: 'new', votes: { $gte: board.autoApproveThreshold } },
@@ -42,10 +51,15 @@ export async function nativeIdealService(node: Node, session: Session): Promise<
       return { op: 'put', node };
     });
 
-    if (intake === undefined) throw new KernelError('INVALID', 'Service has no current mutation intake');
+    if (intake === undefined)
+      throw new KernelError('INVALID', 'Service has no current mutation intake');
     const opId: OpId = { epoch: intake, time: Date.now(), nonce: randomUUID() };
     try {
-      await session.commit({ changes, expect: { selectors: [{ selector, at: selected.at }] }, opId }).outcome;
+      await session.commit({
+        changes,
+        expect: { selectors: [{ selector, at: selected.at }] },
+        opId,
+      }).outcome;
     } catch (error) {
       if (error instanceof KernelError && error.code === 'CONFLICT') return;
       throw error;
@@ -76,7 +90,7 @@ export async function nativeIdealService(node: Node, session: Session): Promise<
         if (work === task) work = undefined;
         if (requested && !stopping) requestReconciliation();
       },
-      error => {
+      (error) => {
         if (work === task) work = undefined;
         readyReject(error);
         failService(error);
@@ -88,7 +102,8 @@ export async function nativeIdealService(node: Node, session: Session): Promise<
     try {
       for await (const frame of session.lane) {
         if (frame.t === 'welcome') intake = frame.intake;
-        if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined) intake = frame.intake;
+        if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined)
+          intake = frame.intake;
         if (frame.t === 'end' && frame.sub === sub) throw frame.error;
         if (frame.t === 'snap' && frame.sub === sub) {
           requestReconciliation();

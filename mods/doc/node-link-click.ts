@@ -6,7 +6,11 @@ type ClosestCapable = {
 };
 
 export function getNodeLinkPath(target: EventTarget | ClosestCapable | null): string | null {
-  if (!target || typeof target !== 'object' || typeof (target as ClosestCapable).closest !== 'function') {
+  if (
+    !target ||
+    typeof target !== 'object' ||
+    typeof (target as ClosestCapable).closest !== 'function'
+  ) {
     return null;
   }
 

@@ -245,7 +245,5 @@ function MessageBubble({ msg }: { msg: ThreadMessage }) {
 }
 
 export const clientModules = [
-  declareClientModule('@treenx/mods/agent/views/chat', [
-    declareView(AiChat, 'react', ChatView)
-  ])
+  declareClientModule('@treenx/mods/agent/views/chat', [declareView(AiChat, 'react', ChatView)]),
 ];

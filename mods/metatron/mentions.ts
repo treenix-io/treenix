@@ -27,5 +27,5 @@ export function parseMentions(text: string): Mention[] {
 /** Extract unique paths from mentions */
 export function uniqueMentionPaths(text: string): string[] {
   const mentions = parseMentions(text);
-  return [...new Set(mentions.map(m => m.path))];
+  return [...new Set(mentions.map((m) => m.path))];
 }

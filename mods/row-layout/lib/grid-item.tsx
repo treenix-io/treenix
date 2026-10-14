@@ -1,39 +1,54 @@
-import { useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent,
-  DropdownMenuSubTrigger, DropdownMenuTrigger,
-} from '@treenx/react/ui/dropdown-menu'
-import { EllipsisVertical } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { isComponentRef, type LayoutItem } from './types'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@treenx/react/ui/dropdown-menu';
+import { EllipsisVertical } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { isComponentRef, type LayoutItem } from './types';
 
 const PADDINGS = [
   { label: 'None', value: '' },
   { label: 'Small', value: 'p-2' },
   { label: 'Medium', value: 'p-4' },
   { label: 'Large', value: 'p-6' },
-] as const
+] as const;
 
 type GridItemProps = {
-  item: LayoutItem
-  editable?: boolean
-  children: ReactNode
-  onUpdate?: (patch: Partial<LayoutItem>) => void
-  onHide?: () => void
-  onRemove?: () => void
-  isCrossRow?: boolean
-  extraMenu?: ReactNode
-  prependMenu?: ReactNode
-}
+  item: LayoutItem;
+  editable?: boolean;
+  children: ReactNode;
+  onUpdate?: (patch: Partial<LayoutItem>) => void;
+  onHide?: () => void;
+  onRemove?: () => void;
+  isCrossRow?: boolean;
+  extraMenu?: ReactNode;
+  prependMenu?: ReactNode;
+};
 
-export function GridItem({ item, editable, children, onUpdate, onHide, onRemove, isCrossRow, extraMenu, prependMenu }: GridItemProps) {
+export function GridItem({
+  item,
+  editable,
+  children,
+  onUpdate,
+  onHide,
+  onRemove,
+  isCrossRow,
+  extraMenu,
+  prependMenu,
+}: GridItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.ref,
-  })
+  });
 
-  const dragProps = editable ? { ...attributes, ...listeners } : {}
+  const dragProps = editable ? { ...attributes, ...listeners } : {};
 
   return (
     <div
@@ -68,7 +83,7 @@ export function GridItem({ item, editable, children, onUpdate, onHide, onRemove,
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="text-xs">Padding</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  {PADDINGS.map(p => (
+                  {PADDINGS.map((p) => (
                     <DropdownMenuItem
                       key={p.value}
                       className={`text-xs ${item.padding === p.value ? 'font-bold' : ''}`}
@@ -89,7 +104,10 @@ export function GridItem({ item, editable, children, onUpdate, onHide, onRemove,
               )}
 
               {!isComponentRef(item.ref) && (
-                <DropdownMenuItem className="text-xs text-destructive" onSelect={onRemove ?? onHide}>
+                <DropdownMenuItem
+                  className="text-xs text-destructive"
+                  onSelect={onRemove ?? onHide}
+                >
                   Remove
                 </DropdownMenuItem>
               )}
@@ -107,5 +125,5 @@ export function GridItem({ item, editable, children, onUpdate, onHide, onRemove,
 
       {children}
     </div>
-  )
+  );
 }

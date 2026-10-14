@@ -5,4 +5,10 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 /** On-demand sensor reading generator — streams N readings via generator action. */
 export class DemoGenerator {}
-export const clientModules = [declareOpenModule('@treenx/mods/sensor-generator/types', [], [declareClientType('examples.demo.generator', DemoGenerator)])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/sensor-generator/types',
+    [],
+    [declareClientType('examples.demo.generator', DemoGenerator)],
+  ),
+];

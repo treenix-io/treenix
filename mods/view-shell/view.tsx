@@ -1,4 +1,4 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // View shell — registered for t.view.shell. Public read-only view of any node
 // at the URL tail. Works in both `react` (client) and `site` (SSR) contexts:
 // no auth gate (SSR is anonymous-only by design), no mutations, no chrome.
@@ -7,19 +7,19 @@ import { declareClientModule,declareView } from '@treenx/react/context/client-re
 // Render context comes from ?ctx=<name> (default 'react') and is preserved
 // across navigations via useRouteShell's preserveQuery.
 
-import { EMPTY,RouteParamsContext } from '@treenx/react/context/route-params';
+import { EMPTY, RouteParamsContext } from '@treenx/react/context/route-params';
 import {
-NavigateProvider,
-NodeProvider,
-Render,
-RenderContext,
-useAutoSave,
-useLocation,
-usePath,
-useTreeEffects,
-useReactivePathEvents,
-type View,
-view,
+  NavigateProvider,
+  NodeProvider,
+  Render,
+  RenderContext,
+  useAutoSave,
+  useLocation,
+  usePath,
+  useTreeEffects,
+  useReactivePathEvents,
+  type View,
+  view,
 } from '@treenx/react';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ViewShell } from './types';
@@ -58,8 +58,21 @@ const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
             <RenderContext name={renderCtx}>
-              <NodeProvider value={draft}><Render value={draft} onChange={onChange} ctx={effects.lane ? { node: draft, path: draft.$path,
-                execute: (action, data) => effects.execute(draft.$path, action, data) } : undefined} /></NodeProvider>
+              <NodeProvider value={draft}>
+                <Render
+                  value={draft}
+                  onChange={onChange}
+                  ctx={
+                    effects.lane
+                      ? {
+                          node: draft,
+                          path: draft.$path,
+                          execute: (action, data) => effects.execute(draft.$path, action, data),
+                        }
+                      : undefined
+                  }
+                />
+              </NodeProvider>
             </RenderContext>
           </div>
         </div>
@@ -71,6 +84,6 @@ const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
 export const clientModules = [
   declareClientModule('@treenx/mods/view-shell/view', [
     view(ViewShell, ViewShellView),
-    declareView(ViewShell, 'site', ViewShellView)
-  ])
+    declareView(ViewShell, 'site', ViewShellView),
+  ]),
 ];

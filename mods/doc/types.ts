@@ -3,7 +3,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { declareText } from '@treenx/core/contexts/text';
 import { tiptapToMd } from './markdown';
 
-
 /** Rich document — Tiptap JSON with embedded Treenix components */
 export class DocPage {
   /** @title Title */
@@ -40,7 +39,10 @@ const declaredText = declareText(DocPage, (data: Partial<DocPage>) => {
   return lines.join('\n\n');
 });
 
-export const clientModules = [declareOpenModule('@treenx/mods/doc/types', [declaredText], [
-  declaredDocPage,
-  declaredDocFrontmatter,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/doc/types',
+    [declaredText],
+    [declaredDocPage, declaredDocFrontmatter],
+  ),
+];

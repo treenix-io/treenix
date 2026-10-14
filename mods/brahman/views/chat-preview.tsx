@@ -2,26 +2,31 @@ import type { PresentationNode } from '@treenx/react';
 // Chat preview — Telegram-style visualization of page actions
 // Registered as react:chat for brahman.page
 
-import { type View,useChildren } from '@treenx/react';
-import { Camera,File,Mic,Video } from 'lucide-react';
-import type { MenuRow,MenuType,PageConfig,TString } from '../types';
-import { actionIcon,actionSummary } from './action-cards';
+import { type View, useChildren } from '@treenx/react';
+import { Camera, File, Mic, Video } from 'lucide-react';
+import type { MenuRow, MenuType, PageConfig, TString } from '../types';
+import { actionIcon, actionSummary } from './action-cards';
 import { tstringPreview } from './tstring-input';
 
 // ── Helpers (browser-safe, no grammy import) ──
 
 function tstr(ts: TString | undefined): string {
   if (!ts) return '';
-  return ts.ru || ts.en || Object.values(ts).find(v => v) || '';
+  return ts.ru || ts.en || Object.values(ts).find((v) => v) || '';
 }
 
 // ── Telegram-style HTML rendering (safe subset) ──
 
 const TG_TAGS: Record<string, string> = {
-  b: 'font-bold', strong: 'font-bold',
-  i: 'italic', em: 'italic',
-  u: 'underline', ins: 'underline',
-  s: 'line-through', strike: 'line-through', del: 'line-through',
+  b: 'font-bold',
+  strong: 'font-bold',
+  i: 'italic',
+  em: 'italic',
+  u: 'underline',
+  ins: 'underline',
+  s: 'line-through',
+  strike: 'line-through',
+  del: 'line-through',
   code: 'font-mono text-[13px] bg-[#1a2636] px-1 rounded',
   pre: 'font-mono text-[13px] bg-[#1a2636] p-2 rounded block overflow-x-auto',
   blockquote: 'border-l-2 border-[#3d6a99] pl-2 italic',
@@ -39,13 +44,27 @@ function domToReact(node: Node, key: number): React.ReactNode {
   if (tag === 'a') {
     const href = el.getAttribute('href') || '#';
     const children = Array.from(el.childNodes).map(domToReact);
-    return <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-[#5b9bd5] underline">{children}</a>;
+    return (
+      <a
+        key={key}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[#5b9bd5] underline"
+      >
+        {children}
+      </a>
+    );
   }
 
   const cls = TG_TAGS[tag];
   if (cls) {
     const children = Array.from(el.childNodes).map(domToReact);
-    return <span key={key} className={cls}>{children}</span>;
+    return (
+      <span key={key} className={cls}>
+        {children}
+      </span>
+    );
   }
 
   // Unknown tag — render children as text only
@@ -89,15 +108,16 @@ function InlineButtons({ rows, menuType }: { rows: MenuRow[]; menuType: MenuType
     <div className={`flex flex-col gap-0.5 ${isReply ? 'w-full mt-2' : 'max-w-[85%] mt-0.5'}`}>
       {rows.map((row, ri) => (
         <div key={ri} className="flex gap-0.5">
-          {row.buttons.map(btn => {
+          {row.buttons.map((btn) => {
             const text = tstringPreview(btn.title, 24) || '...';
             return (
               <div
                 key={btn.id}
                 className={`flex-1 text-center text-xs py-1.5 px-2 rounded truncate
-                  ${isReply
-                    ? 'bg-[#1c2733] text-[#e1e3e6] border border-[#2b3945]'
-                    : 'bg-[#2b5278] text-[#e1e3e6]'
+                  ${
+                    isReply
+                      ? 'bg-[#1c2733] text-[#e1e3e6] border border-[#2b3945]'
+                      : 'bg-[#2b5278] text-[#e1e3e6]'
                   }`}
               >
                 {btn.url ? `🔗 ${text}` : text}
@@ -113,8 +133,10 @@ function InlineButtons({ rows, menuType }: { rows: MenuRow[]; menuType: MenuType
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-end">
-      <div className="bg-[#2b5278] text-[#e1e3e6] text-sm rounded-lg rounded-tr-sm px-3 py-2 max-w-[70%]
-        border border-dashed border-[#3d6a99] opacity-60">
+      <div
+        className="bg-[#2b5278] text-[#e1e3e6] text-sm rounded-lg rounded-tr-sm px-3 py-2 max-w-[70%]
+        border border-dashed border-[#3d6a99] opacity-60"
+      >
         {children}
       </div>
     </div>
@@ -140,7 +162,11 @@ const FILE_ICONS: Record<string, React.ReactNode> = {
 
 // ── Action renderers ──
 
-function renderAction(node: PresentationNode, _index: number, isFirstBubble: boolean): React.ReactNode {
+function renderAction(
+  node: PresentationNode,
+  _index: number,
+  isFirstBubble: boolean,
+): React.ReactNode {
   const c = getComponent(node);
   const type = node.$type;
 
@@ -151,7 +177,9 @@ function renderAction(node: PresentationNode, _index: number, isFirstBubble: boo
       const rows = (c.rows as MenuRow[]) ?? [];
       return (
         <div key={node.$path} className="flex flex-col items-start gap-0">
-          <BotBubble first={isFirstBubble}><TgHtml text={text} /></BotBubble>
+          <BotBubble first={isFirstBubble}>
+            <TgHtml text={text} />
+          </BotBubble>
           <InlineButtons rows={rows} menuType={menuType} />
         </div>
       );
@@ -162,12 +190,17 @@ function renderAction(node: PresentationNode, _index: number, isFirstBubble: boo
       const inputType = (c.inputType as string) ?? 'text';
       return (
         <div key={node.$path} className="space-y-1.5">
-          <BotBubble first={isFirstBubble}><TgHtml text={text} /></BotBubble>
+          <BotBubble first={isFirstBubble}>
+            <TgHtml text={text} />
+          </BotBubble>
           <UserBubble>
-            {inputType === 'photo'
-              ? <span className="flex items-center gap-1"><Camera className="h-3.5 w-3.5" /> Photo</span>
-              : <span className="italic text-xs">User types answer...</span>
-            }
+            {inputType === 'photo' ? (
+              <span className="flex items-center gap-1">
+                <Camera className="h-3.5 w-3.5" /> Photo
+              </span>
+            ) : (
+              <span className="italic text-xs">User types answer...</span>
+            )}
           </UserBubble>
         </div>
       );
@@ -192,10 +225,16 @@ function renderAction(node: PresentationNode, _index: number, isFirstBubble: boo
       const text = tstr(c.text as TString) || 'Choose language';
       return (
         <div key={node.$path} className="flex flex-col items-start gap-0.5">
-          <BotBubble first={isFirstBubble}><TgHtml text={text} /></BotBubble>
+          <BotBubble first={isFirstBubble}>
+            <TgHtml text={text} />
+          </BotBubble>
           <div className="flex gap-0.5 max-w-[85%]">
-            <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">🇷🇺 RU</div>
-            <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">🇬🇧 EN</div>
+            <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">
+              🇷🇺 RU
+            </div>
+            <div className="flex-1 text-center text-xs py-1.5 px-2 rounded bg-[#2b5278] text-[#e1e3e6]">
+              🇬🇧 EN
+            </div>
           </div>
         </div>
       );
@@ -208,7 +247,10 @@ function renderAction(node: PresentationNode, _index: number, isFirstBubble: boo
       return (
         <SystemPill key={node.$path}>
           {actionIcon(type)}
-          <span>{label}{summary ? `: ${summary}` : ''}</span>
+          <span>
+            {label}
+            {summary ? `: ${summary}` : ''}
+          </span>
         </SystemPill>
       );
     }
@@ -224,8 +266,10 @@ export const PageChatPreview: View<PageConfig> = ({ value, ctx }) => {
   const positions = value.positions;
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
-    ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
+    ...positions
+      .map((p) => children.find((c) => c.$path === p))
+      .filter((c): c is PresentationNode => !!c),
+    ...children.filter((c) => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 
   let hadBotBubble = false;
@@ -246,8 +290,12 @@ export const PageChatPreview: View<PageConfig> = ({ value, ctx }) => {
       )}
 
       {sorted.map((child, i) => {
-        const isBubbleType = ['brahman.action.message', 'brahman.action.question',
-          'brahman.action.file', 'brahman.action.selectlang'].includes(child.$type);
+        const isBubbleType = [
+          'brahman.action.message',
+          'brahman.action.question',
+          'brahman.action.file',
+          'brahman.action.selectlang',
+        ].includes(child.$type);
         const isFirstBubble = isBubbleType && !hadBotBubble;
         if (isBubbleType) hadBotBubble = true;
 
@@ -262,4 +310,4 @@ export const PageChatPreview: View<PageConfig> = ({ value, ctx }) => {
       </div>
     </div>
   );
-}
+};

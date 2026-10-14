@@ -1,13 +1,20 @@
 // Launcher icons — react:launcher:icon context with iOS-style SVG icons
 
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { RenderProps } from '@treenx/react';
-import type { FC,ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 // ── Icon shell — rounded rect with gradient + glow ──
 
-function IconShell({ children, g1, g2 }: {
-  children: ReactNode; g1: string; g2: string; glow?: string;
+function IconShell({
+  children,
+  g1,
+  g2,
+}: {
+  children: ReactNode;
+  g1: string;
+  g2: string;
+  glow?: string;
 }) {
   const id = `g-${g1.replace('#', '')}`;
   return (
@@ -28,8 +35,17 @@ function IconShell({ children, g1, g2 }: {
       {/* Top sheen */}
       <rect x="4" y="4" width="112" height="56" rx="26" fill={`url(#${id}-sheen)`} />
       {/* Subtle inner border */}
-      <rect x="4" y="4" width="112" height="112" rx="26" fill="none"
-        stroke="white" strokeOpacity="0.15" strokeWidth="1" />
+      <rect
+        x="4"
+        y="4"
+        width="112"
+        height="112"
+        rx="26"
+        fill="none"
+        stroke="white"
+        strokeOpacity="0.15"
+        strokeWidth="1"
+      />
       {/* Icon content */}
       <g fill="white" fillOpacity="0.95">
         {children}
@@ -56,11 +72,25 @@ const TodoIcon: FC<RenderProps> = () => (
   <IconShell g1="#22c55e" g2="#15803d">
     {/* 3 checkbox rows */}
     <rect x="30" y="34" width="14" height="14" rx="4" fillOpacity="0.4" />
-    <path d="M34 41 l3 3 l6-6" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <path
+      d="M34 41 l3 3 l6-6"
+      stroke="white"
+      strokeWidth="2.5"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
     <rect x="52" y="37" width="36" height="6" rx="3" fillOpacity="0.6" />
 
     <rect x="30" y="54" width="14" height="14" rx="4" fillOpacity="0.4" />
-    <path d="M34 61 l3 3 l6-6" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <path
+      d="M34 61 l3 3 l6-6"
+      stroke="white"
+      strokeWidth="2.5"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
     <rect x="52" y="57" width="28" height="6" rx="3" fillOpacity="0.6" />
 
     <rect x="30" y="74" width="14" height="14" rx="4" fillOpacity="0.25" />
@@ -74,9 +104,24 @@ const ContactIcon: FC<RenderProps> = () => (
     {/* Envelope body */}
     <rect x="24" y="38" width="72" height="48" rx="8" fillOpacity="0.4" />
     {/* Envelope flap — V shape */}
-    <path d="M24 42 l36 26 l36-26" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" strokeOpacity="0.9" />
+    <path
+      d="M24 42 l36 26 l36-26"
+      fill="none"
+      stroke="white"
+      strokeWidth="4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeOpacity="0.9"
+    />
     {/* Bottom fold */}
-    <path d="M24 86 l24-18 M96 86 l-24-18" fill="none" stroke="white" strokeWidth="2" strokeOpacity="0.3" strokeLinecap="round" />
+    <path
+      d="M24 86 l24-18 M96 86 l-24-18"
+      fill="none"
+      stroke="white"
+      strokeWidth="2"
+      strokeOpacity="0.3"
+      strokeLinecap="round"
+    />
   </IconShell>
 );
 
@@ -100,9 +145,13 @@ const DocsIcon: FC<RenderProps> = () => (
 const SystemIcon: FC<RenderProps> = () => (
   <IconShell g1="#475569" g2="#1e293b">
     {/* Gear — outer ring with teeth */}
-    <path d="
+    <path
+      d="
       M60 28 l5 0 l2 8 l7 3 l7-5 l4 4 l-5 7 l3 7 l8 2 l0 5 l-8 2 l-3 7 l5 7 l-4 4 l-7-5 l-7 3 l-2 8 l-5 0 l-2-8 l-7-3 l-7 5 l-4-4 l5-7 l-3-7 l-8-2 l0-5 l8-2 l3-7 l-5-7 l4-4 l7 5 l7-3 z
-    " fillOpacity="0.8" fillRule="evenodd" />
+    "
+      fillOpacity="0.8"
+      fillRule="evenodd"
+    />
     {/* Inner circle (hole) */}
     <circle cx="60" cy="60" r="14" fill="#334155" />
     <circle cx="60" cy="60" r="14" fill="white" fillOpacity="0.15" />
@@ -125,7 +174,6 @@ const WhisperIcon: FC<RenderProps> = () => (
 );
 
 // ── Sim (Network/Agents) ──
-
 
 // ── Sensor (Thermometer + gauge) ──
 const SensorIcon: FC<RenderProps> = () => (
@@ -177,8 +225,16 @@ const DefaultIcon: FC<RenderProps> = ({ value }) => {
 
   return (
     <IconShell g1={g1} g2={g2}>
-      <text x="60" y="68" textAnchor="middle" fontSize="40" fontWeight="700" fontFamily="system-ui"
-        fill="white" fillOpacity="0.9">
+      <text
+        x="60"
+        y="68"
+        textAnchor="middle"
+        fontSize="40"
+        fontWeight="700"
+        fontFamily="system-ui"
+        fill="white"
+        fillOpacity="0.9"
+      >
         {letter}
       </text>
     </IconShell>

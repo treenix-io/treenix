@@ -5,9 +5,7 @@ import { type View } from '@treenx/react';
 import { lazy, Suspense } from 'react';
 import { T3dScene } from './types';
 
-const SceneViewLazy = lazy(() =>
-  import('./view-impl').then((m) => ({ default: m.SceneView })),
-);
+const SceneViewLazy = lazy(() => import('./view-impl').then((m) => ({ default: m.SceneView })));
 
 const SceneView: View<T3dScene> = (props) => (
   <Suspense fallback={<div className="w-full h-[600px] rounded-lg bg-black/90 animate-pulse" />}>
@@ -16,7 +14,5 @@ const SceneView: View<T3dScene> = (props) => (
 );
 
 export const clientModules = [
-  declareClientModule('@treenx/mods/three/react', [
-    declareView(T3dScene, 'react', SceneView)
-  ])
+  declareClientModule('@treenx/mods/three/react', [declareView(T3dScene, 'react', SceneView)]),
 ];

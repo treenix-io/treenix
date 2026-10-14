@@ -10,19 +10,28 @@ export type ConflictEntry = NativeBranchConflict;
 
 /** Typed calls from the existing UI are implemented by the native container owner. */
 export interface Branches {
-  create(data?: { title?: string; owner?: string; ownerPath?: string; base?: string }): Promise<{ path: string }>;
+  create(data?: {
+    title?: string;
+    owner?: string;
+    ownerPath?: string;
+    base?: string;
+  }): Promise<{ path: string }>;
 }
 
 /** Native actions use the UI's data class without adding executable methods to snapshots. */
 export interface Branch {
   /** @read @description List the native future's changes against live. */
   diff(): Promise<{ entries: NativeBranchDiff[] }>;
-  merge(): Promise<{ merged: number; applied: string[]; conflicts: NativeBranchConflict[]; status?: string }>;
+  merge(): Promise<{
+    merged: number;
+    applied: string[];
+    conflicts: NativeBranchConflict[];
+    status?: string;
+  }>;
 }
 
 /** Container at /branches — branches are created through it, never by hand. */
-export class Branches {
-}
+export class Branches {}
 
 /** A write-isolated future. Work happens under `<path>/tree`; every write is
  *  captured under `<path>/delta` and the live tree stays untouched until merge. */
@@ -37,7 +46,8 @@ export class Branch {
 
   /** @description Close the branch without merging. Delta stays as the record. */
   abandon() {
-    if (this.status === 'merged') throw new KernelError('CONFLICT', 'cannot abandon a merged branch');
+    if (this.status === 'merged')
+      throw new KernelError('CONFLICT', 'cannot abandon a merged branch');
     this.status = 'abandoned';
   }
 
@@ -60,8 +70,10 @@ const declaredTBranch = declareClientType('t.branch', Branch);
 export class MountBranch {}
 const declaredTMountBranch = declareClientType('t.mount.branch', MountBranch);
 
-export const clientModules = [declareOpenModule('@treenx/mods/branch/types', [], [
-  declaredTBranches,
-  declaredTBranch,
-  declaredTMountBranch,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/branch/types',
+    [],
+    [declaredTBranches, declaredTBranch, declaredTMountBranch],
+  ),
+];

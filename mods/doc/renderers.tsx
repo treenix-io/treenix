@@ -13,7 +13,9 @@ type BlockProps = { value: any; onChange?: (data: any) => void };
 
 function DocPageView(props: BlockProps) {
   return (
-    <Suspense fallback={<div className="max-w-3xl mx-auto py-6 px-4 min-h-[300px] animate-pulse" />}>
+    <Suspense
+      fallback={<div className="max-w-3xl mx-auto py-6 px-4 min-h-[300px] animate-pulse" />}
+    >
       <DocPageViewLazy {...props} />
     </Suspense>
   );
@@ -64,18 +66,18 @@ const DocPageCard: View<DocPage> = ({ value, ctx }) => {
         <span className="flex-1 truncate text-[13px] font-medium text-foreground">{title}</span>
       </div>
       {snippet ? (
-        <div className="line-clamp-3 text-[11px] leading-snug text-muted-foreground">
-          {snippet}
-        </div>
+        <div className="line-clamp-3 text-[11px] leading-snug text-muted-foreground">{snippet}</div>
       ) : (
         <div className="text-[11px] italic text-muted-foreground">Empty</div>
       )}
     </>
   );
-}
+};
 
-export const clientModules = [declareClientModule('@treenx/mods/doc/renderers', [
-  declareView('doc.page', 'react', ({ onChange, ...props }) => DocPageView(props)),
-  declareView('doc.page', 'react:edit', DocPageView),
-  declareView('doc.page', 'react:card', DocPageCard),
-])];
+export const clientModules = [
+  declareClientModule('@treenx/mods/doc/renderers', [
+    declareView('doc.page', 'react', ({ onChange, ...props }) => DocPageView(props)),
+    declareView('doc.page', 'react:edit', DocPageView),
+    declareView('doc.page', 'react:card', DocPageCard),
+  ]),
+];

@@ -1,10 +1,7 @@
 import crypto from 'node:crypto';
 import { createNode } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import {
-  type ReadResult,
-  type WriteActionContext,
-} from '@treenx/core/kernel';
+import { type ReadResult, type WriteActionContext } from '@treenx/core/kernel';
 import { buildRegisteredTypeDef } from '@treenx/core/kernel/typedef';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { ActionDef, ModuleManifest } from '@treenx/core/kernel/types';
@@ -38,8 +35,22 @@ export function nativeTodoManifest(): ModuleManifest {
       { type: 'todo.item', context: 'action:toggle', handler: toggle },
     ]),
     types: [
-      buildRegisteredTypeDef({ name: 'todo.item', module: id, security: 'ordinary', schema: item, methods: [], actions: { toggle } }),
-      buildRegisteredTypeDef({ name: 'todo.list', module: id, security: 'ordinary', schema: list, methods: [], actions: { add } }),
+      buildRegisteredTypeDef({
+        name: 'todo.item',
+        module: id,
+        security: 'ordinary',
+        schema: item,
+        methods: [],
+        actions: { toggle },
+      }),
+      buildRegisteredTypeDef({
+        name: 'todo.list',
+        module: id,
+        security: 'ordinary',
+        schema: list,
+        methods: [],
+        actions: { add },
+      }),
     ],
     security: [],
   };

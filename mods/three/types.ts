@@ -1,7 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 /** @title 3D Scene — root container for the Three.js viewport */
 export class T3dScene {}
 
@@ -22,7 +21,18 @@ export class T3dObject {
 
 /** @title 3D Mesh — geometry shape */
 export class T3dMesh {
-  /** @title Geometry */ geometry: 'box' | 'sphere' | 'plane' | 'cylinder' | 'torus' | 'cone' | 'capsule' | 'ring' | 'dodecahedron' | 'icosahedron' | 'octahedron' = 'box';
+  /** @title Geometry */ geometry:
+    | 'box'
+    | 'sphere'
+    | 'plane'
+    | 'cylinder'
+    | 'torus'
+    | 'cone'
+    | 'capsule'
+    | 'ring'
+    | 'dodecahedron'
+    | 'icosahedron'
+    | 'octahedron' = 'box';
   /** @title Width / Radius */ width = 1;
   /** @title Height */ height = 1;
   /** @title Depth */ depth = 1;
@@ -35,7 +45,8 @@ export class T3dMesh {
 
 /** @title 3D Material — surface appearance */
 export class T3dMaterial {
-  /** @title Type */ kind: 'standard' | 'physical' | 'basic' | 'phong' | 'toon' | 'lambert' = 'standard';
+  /** @title Type */ kind: 'standard' | 'physical' | 'basic' | 'phong' | 'toon' | 'lambert' =
+    'standard';
   /** @title Color */ color = '#6366f1';
   /** @title Emissive Color */ emissive = '#000000';
   /** @title Emissive Intensity */ emissiveIntensity = 0;
@@ -59,7 +70,13 @@ export class T3dMaterial {
 
 /** @title 3D Light — light source */
 export class T3dLight {
-  /** @title Kind */ kind: 'point' | 'directional' | 'spot' | 'ambient' | 'hemisphere' | 'rect-area' = 'point';
+  /** @title Kind */ kind:
+    | 'point'
+    | 'directional'
+    | 'spot'
+    | 'ambient'
+    | 'hemisphere'
+    | 'rect-area' = 'point';
   /** @title Color */ color = '#ffffff';
   /** @title Ground Color (hemisphere) */ groundColor = '#444444';
   /** @title Intensity */ intensity = 1;
@@ -208,7 +225,8 @@ export class T3dLine {
   /** @title Dashed */ dashed = false;
   /** @title Dash Size */ dashSize = 0.1;
   /** @title Gap Size */ gapSize = 0.05;
-  /** @title Points (JSON array of [x,y,z]) @format textarea */ points = '[[0,0,0],[1,1,0],[2,0,0]]';
+  /** @title Points (JSON array of [x,y,z]) @format textarea */ points =
+    '[[0,0,0],[1,1,0],[2,0,0]]';
 }
 
 // --- Script ---
@@ -239,21 +257,27 @@ const declaredT3dTrail = declareClientType('t3d.trail', T3dTrail);
 const declaredT3dLine = declareClientType('t3d.line', T3dLine);
 const declaredT3dScript = declareClientType('t3d.script', T3dScript);
 
-export const clientModules = [declareOpenModule('@treenx/mods/three/types', [], [
-  declaredT3dScene,
-  declaredT3dObject,
-  declaredT3dMesh,
-  declaredT3dMaterial,
-  declaredT3dLight,
-  declaredT3dCamera,
-  declaredT3dRigidbody,
-  declaredT3dCollider,
-  declaredT3dAudio,
-  declaredT3dParticles,
-  declaredT3dText,
-  declaredT3dAnimator,
-  declaredT3dLod,
-  declaredT3dTrail,
-  declaredT3dLine,
-  declaredT3dScript,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/three/types',
+    [],
+    [
+      declaredT3dScene,
+      declaredT3dObject,
+      declaredT3dMesh,
+      declaredT3dMaterial,
+      declaredT3dLight,
+      declaredT3dCamera,
+      declaredT3dRigidbody,
+      declaredT3dCollider,
+      declaredT3dAudio,
+      declaredT3dParticles,
+      declaredT3dText,
+      declaredT3dAnimator,
+      declaredT3dLod,
+      declaredT3dTrail,
+      declaredT3dLine,
+      declaredT3dScript,
+    ],
+  ),
+];

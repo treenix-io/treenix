@@ -16,7 +16,7 @@ export function telegramOwner(): {
   register(path: string, principal: Principal, bot: Bot): () => void;
 } {
   const running = new Map<string, RunningBot>();
-  const io: ActionIoBinding = scope => {
+  const io: ActionIoBinding = (scope) => {
     const controller = new TelegramAbortController();
     /** Grammy owns this signal type; actual action retirement cancels every bound external call. */
     function abort(): void {
@@ -42,12 +42,20 @@ export function telegramOwner(): {
     const brahman: BrahmanTelegram = {
       async send(path, chatId, text, options) {
         const bot = await admitted(path);
-        const sent = await bot.api.sendMessage(chatId, text, {
-          parse_mode: options.parse_mode,
-          link_preview_options: options.disableLinks ? { is_disabled: true } : undefined,
-          reply_parameters: options.replyToMessageId === undefined ? undefined : { message_id: options.replyToMessageId },
-          reply_markup: options.replyMarkup,
-        }, telegramSignal);
+        const sent = await bot.api.sendMessage(
+          chatId,
+          text,
+          {
+            parse_mode: options.parse_mode,
+            link_preview_options: options.disableLinks ? { is_disabled: true } : undefined,
+            reply_parameters:
+              options.replyToMessageId === undefined
+                ? undefined
+                : { message_id: options.replyToMessageId },
+            reply_markup: options.replyMarkup,
+          },
+          telegramSignal,
+        );
         scope.assertActive();
         return sent.message_id;
       },
@@ -56,10 +64,17 @@ export function telegramOwner(): {
         const markup = options.replyMarkup;
         if (markup !== undefined && !('inline_keyboard' in markup))
           throw new KernelError('INVALID', 'Edited message requires an inline keyboard');
-        await bot.api.editMessageText(chatId, messageId, text, {
-          parse_mode: options.parse_mode, reply_markup: markup,
-          link_preview_options: options.disableLinks ? { is_disabled: true } : undefined,
-        }, telegramSignal);
+        await bot.api.editMessageText(
+          chatId,
+          messageId,
+          text,
+          {
+            parse_mode: options.parse_mode,
+            reply_markup: markup,
+            link_preview_options: options.disableLinks ? { is_disabled: true } : undefined,
+          },
+          telegramSignal,
+        );
         scope.assertActive();
       },
       async remove(path, chatId, messageId) {
@@ -67,21 +82,31 @@ export function telegramOwner(): {
         scope.assertActive();
       },
       async forward(path, chatId, fromChatId, messageId) {
-        const sent = await (await admitted(path)).api.forwardMessage(chatId, fromChatId, messageId, undefined, telegramSignal);
+        const sent = await (
+          await admitted(path)
+        ).api.forwardMessage(chatId, fromChatId, messageId, undefined, telegramSignal);
         scope.assertActive();
         return sent.message_id;
       },
       async file(path, chatId, kind, fileId) {
         const bot = await admitted(path);
         const api = bot.api;
-        const sent = kind === 'photo' ? await api.sendPhoto(chatId, fileId, undefined, telegramSignal)
-          : kind === 'video' ? await api.sendVideo(chatId, fileId, undefined, telegramSignal)
-          : kind === 'audio' ? await api.sendAudio(chatId, fileId, undefined, telegramSignal)
-          : kind === 'voice' ? await api.sendVoice(chatId, fileId, undefined, telegramSignal)
-          : kind === 'document' ? await api.sendDocument(chatId, fileId, undefined, telegramSignal)
-          : kind === 'sticker' ? await api.sendSticker(chatId, fileId, undefined, telegramSignal)
-          : kind === 'animation' ? await api.sendAnimation(chatId, fileId, undefined, telegramSignal)
-          : undefined;
+        const sent =
+          kind === 'photo'
+            ? await api.sendPhoto(chatId, fileId, undefined, telegramSignal)
+            : kind === 'video'
+              ? await api.sendVideo(chatId, fileId, undefined, telegramSignal)
+              : kind === 'audio'
+                ? await api.sendAudio(chatId, fileId, undefined, telegramSignal)
+                : kind === 'voice'
+                  ? await api.sendVoice(chatId, fileId, undefined, telegramSignal)
+                  : kind === 'document'
+                    ? await api.sendDocument(chatId, fileId, undefined, telegramSignal)
+                    : kind === 'sticker'
+                      ? await api.sendSticker(chatId, fileId, undefined, telegramSignal)
+                      : kind === 'animation'
+                        ? await api.sendAnimation(chatId, fileId, undefined, telegramSignal)
+                        : undefined;
         if (sent === undefined) throw new KernelError('INVALID', 'Unsupported Telegram file kind');
         scope.assertActive();
         return sent.message_id;
@@ -89,9 +114,14 @@ export function telegramOwner(): {
       async download(path, fileId) {
         const bot = await admitted(path);
         const file = await bot.api.getFile(fileId, telegramSignal);
-        if (file.file_path === undefined) throw new KernelError('NOT_FOUND', 'Telegram file path is absent');
-        const response = await fetch(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`, { signal: scope.signal });
-        if (!response.ok) throw new KernelError('UNAVAILABLE', `Telegram download failed: ${response.status}`);
+        if (file.file_path === undefined)
+          throw new KernelError('NOT_FOUND', 'Telegram file path is absent');
+        const response = await fetch(
+          `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`,
+          { signal: scope.signal },
+        );
+        if (!response.ok)
+          throw new KernelError('UNAVAILABLE', `Telegram download failed: ${response.status}`);
         const body = new Uint8Array(await response.arrayBuffer());
         scope.assertActive();
         return body;
@@ -100,10 +130,15 @@ export function telegramOwner(): {
     return { brahman };
   };
 
-  return { io, register(path, principal, bot) {
-    if (running.has(path)) throw new KernelError('CONFLICT', 'Bot service is already running');
-    const owner = { bot, principal };
-    running.set(path, owner);
-    return () => { if (running.get(path) === owner) running.delete(path); };
-  } };
+  return {
+    io,
+    register(path, principal, bot) {
+      if (running.has(path)) throw new KernelError('CONFLICT', 'Bot service is already running');
+      const owner = { bot, principal };
+      running.set(path, owner);
+      return () => {
+        if (running.get(path) === owner) running.delete(path);
+      };
+    },
+  };
 }

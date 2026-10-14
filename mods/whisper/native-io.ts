@@ -31,63 +31,101 @@ export interface WhisperIo {
 }
 
 declare module '@treenx/core/kernel/types' {
-  interface Io { readonly whisper?: WhisperIo; }
+  interface Io {
+    readonly whisper?: WhisperIo;
+  }
 }
 
 const convert = promisify(execFile);
-export type WhisperRecognition = (samples: Float32Array, settings: WhisperSettings) => Promise<RecognizedAudio>;
+export type WhisperRecognition = (
+  samples: Float32Array,
+  settings: WhisperSettings,
+) => Promise<RecognizedAudio>;
 
 /** Use the shared cached model after audio has been converted to mono samples. */
-async function recognizeAudio(samples: Float32Array, settings: WhisperSettings): Promise<RecognizedAudio> {
+async function recognizeAudio(
+  samples: Float32Array,
+  settings: WhisperSettings,
+): Promise<RecognizedAudio> {
   const transcriber = await getTranscriber(settings.model);
-  const output = await transcriber(samples, { language: settings.language, return_timestamps: true });
-  return { content: output.text.trim(), duration: output.chunks?.at(-1)?.timestamp[1] ?? 0,
-    segments: output.chunks?.length ?? 0 };
+  const output = await transcriber(samples, {
+    language: settings.language,
+    return_timestamps: true,
+  });
+  return {
+    content: output.text.trim(),
+    duration: output.chunks?.at(-1)?.timestamp[1] ?? 0,
+    segments: output.chunks?.length ?? 0,
+  };
 }
 
 /** Bind authored audio directory names to explicit host capabilities. */
 export function createWhisperIo(
-  directories: Readonly<Record<string, string>>, recognize: WhisperRecognition = recognizeAudio,
+  directories: Readonly<Record<string, string>>,
+  recognize: WhisperRecognition = recognizeAudio,
 ): ActionIoBinding {
-  const admittedDirectories = new Map(Object.entries(directories).map(([name, path]) => [name, resolve(path)]));
+  const admittedDirectories = new Map(
+    Object.entries(directories).map(([name, path]) => [name, resolve(path)]),
+  );
 
-  return scope => {
+  return (scope) => {
     /** A node's configuration can select an admitted directory, never grant filesystem authority. */
     function directory(name: string): string {
       scope.assertActive();
       const path = admittedDirectories.get(name);
-      if (path === undefined) throw new KernelError('FORBIDDEN', 'Whisper audio directory is not admitted');
+      if (path === undefined)
+        throw new KernelError('FORBIDDEN', 'Whisper audio directory is not admitted');
       return path;
     }
 
-    return { whisper: {
-      async save(name, body, mime) {
-        const path = directory(name), extension = extForMime(mime);
-        if (extension === null) throw new KernelError('INVALID', 'Unsupported audio MIME type');
-        const filename = `${randomUUID()}.${extension}`;
-        await mkdir(path, { recursive: true });
-        await writeFile(join(path, filename), body, { signal: scope.signal });
-        scope.assertActive();
-        return { filename, size: body.byteLength, mime };
-      },
+    return {
+      whisper: {
+        async save(name, body, mime) {
+          const path = directory(name),
+            extension = extForMime(mime);
+          if (extension === null) throw new KernelError('INVALID', 'Unsupported audio MIME type');
+          const filename = `${randomUUID()}.${extension}`;
+          await mkdir(path, { recursive: true });
+          await writeFile(join(path, filename), body, { signal: scope.signal });
+          scope.assertActive();
+          return { filename, size: body.byteLength, mime };
+        },
 
-      async recognize(settings, audio) {
-        const path = directory(settings.audioDir), wavPath = join(path, `${audio.filename}_16k.wav`);
-        try {
-          await convert('ffmpeg', ['-i', join(path, audio.filename), '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath],
-            { signal: scope.signal });
-          const samples = await readWavAsFloat32(wavPath);
-          scope.assertActive();
-          const output = await recognize(samples, settings);
-          scope.assertActive();
-          return output;
-        } finally {
-          try { await unlink(wavPath); }
-          catch (error) {
-            if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+        async recognize(settings, audio) {
+          const path = directory(settings.audioDir),
+            wavPath = join(path, `${audio.filename}_16k.wav`);
+          try {
+            await convert(
+              'ffmpeg',
+              [
+                '-i',
+                join(path, audio.filename),
+                '-ar',
+                '16000',
+                '-ac',
+                '1',
+                '-f',
+                'wav',
+                '-y',
+                wavPath,
+              ],
+              { signal: scope.signal },
+            );
+            const samples = await readWavAsFloat32(wavPath);
+            scope.assertActive();
+            const output = await recognize(samples, settings);
+            scope.assertActive();
+            return output;
+          } finally {
+            try {
+              await unlink(wavPath);
+            } catch (error) {
+              if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+                throw error;
+            }
           }
-        }
+        },
       },
-    } };
+    };
   };
 }

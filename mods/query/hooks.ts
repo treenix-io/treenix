@@ -17,13 +17,16 @@ function matchFilters(node: PresentationNode, filters: QueryFilter[]): boolean {
   });
 }
 
-export function useFiltered(children: PresentationNode[], typeFilter: string, filters: QueryFilter[]) {
+export function useFiltered(
+  children: PresentationNode[],
+  typeFilter: string,
+  filters: QueryFilter[],
+) {
   return useMemo(() => {
     let result = children;
-    if (typeFilter) result = result.filter(c =>
-      getComponents(c).some(([, comp]) => comp.$type === typeFilter),
-    );
-    if (filters.length) result = result.filter(c => matchFilters(c, filters));
+    if (typeFilter)
+      result = result.filter((c) => getComponents(c).some(([, comp]) => comp.$type === typeFilter));
+    if (filters.length) result = result.filter((c) => matchFilters(c, filters));
     return result;
   }, [children, typeFilter, filters]);
 }

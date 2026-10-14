@@ -4,23 +4,23 @@ import { declareClientModule } from '@treenx/react/context/client-registry';
 // drives target path resolution; ?root= selects the sidebar root and is
 // preserved across navigations via useRouteShell's preserveQuery.
 
-import { useCallback,useEffect,useMemo,useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { compKey } from '@treenx/core';
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { KernelError } from '@treenx/core/errors';
 import {
-useTreeEffects,
-NavigateProvider,
-setEditorRoot,
-useLocation,
-type View,
-view,
+  useTreeEffects,
+  NavigateProvider,
+  setEditorRoot,
+  useLocation,
+  type View,
+  view,
 } from '@treenx/react';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
-import { ResizableHandle,ResizablePanel,ResizablePanelGroup } from '@treenx/react/ui/resizable';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@treenx/react/ui/resizable';
 import { useAuthContext } from '@treenx/react/app/auth-context';
-import { EMPTY,RouteParamsContext } from '@treenx/react/context/route-params';
+import { EMPTY, RouteParamsContext } from '@treenx/react/context/route-params';
 import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
 import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
 import { Inspector } from '@treenx/react/editor/Inspector';
@@ -35,10 +35,7 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const { search } = useLocation();
 
   const { target: selected, nav } = useRouteShell(ctx!.node, { preserveQuery: { root: '/' } });
-  const root = useMemo(
-    () => new URLSearchParams(search).get('root') || '/',
-    [search],
-  );
+  const root = useMemo(() => new URLSearchParams(search).get('root') || '/', [search]);
 
   const [addingComponentAt, setAddingComponentAt] = useState<string | null>(null);
   useModErrors();
@@ -71,11 +68,14 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const handleDelete = useCallback(
     async (path: string) => {
       const kernel = effects.kernel;
-      if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
+      if (kernel === undefined)
+        throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
       const copy = (await kernel.read({ node: path })).copies[0];
       if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-      await kernel.commit({ changes: [{ op: 'remove', path }],
-        expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+      await kernel.commit({
+        changes: [{ op: 'remove', path }],
+        expect: { nodes: [{ path, rev: copy.node.$rev }] },
+      });
       const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
       nav(parent ?? '/');
     },
@@ -92,73 +92,95 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
       if (!path) return;
       setAddingComponentAt(null);
       const kernel = effects.kernel;
-      if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Component editing requires a native source');
+      if (kernel === undefined)
+        throw new KernelError('UNAVAILABLE', 'Component editing requires a native source');
       const copy = (await kernel.read({ node: path })).copies[0];
       if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-      const description = await effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type');
+      const description = await effects.execute(
+        `/sys/types/${type}`,
+        'describe_type',
+        {},
+        't.type',
+      );
       const defaults: Record<string, unknown> = {};
       for (const [field, schema] of Object.entries(description.schema.properties ?? {}))
         if (Object.hasOwn(schema, 'default')) defaults[field] = structuredClone(schema.default);
-      await kernel.commit({ changes: [{ op: 'patch', path, ops: { $set: {
-        [compKey(name)]: { ...registry.type(type)?.defaults(), ...defaults, $type: type, $v: description.version },
-      } } }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+      await kernel.commit({
+        changes: [
+          {
+            op: 'patch',
+            path,
+            ops: {
+              $set: {
+                [compKey(name)]: {
+                  ...registry.type(type)?.defaults(),
+                  ...defaults,
+                  $type: type,
+                  $v: description.version,
+                },
+              },
+            },
+          },
+        ],
+        expect: { nodes: [{ path, rev: copy.node.$rev }] },
+      });
       toast.success(`Added ${name}`);
     },
     [addingComponentAt, effects, registry],
   );
 
   const handleSetRoot = useCallback(
-    (newRoot: string) => { setEditorRoot(newRoot, selected); },
+    (newRoot: string) => {
+      setEditorRoot(newRoot, selected);
+    },
     [selected],
   );
 
   return (
     <RouteParamsContext value={EMPTY}>
-    <NavigateProvider value={nav}>
-      <ConnectionBanner />
-      <div className="flex h-screen bg-background text-foreground overflow-hidden">
-        <ResizablePanelGroup orientation="horizontal" className="h-full">
-          <EditorSidebar
-            authed={authed!}
-            root={root}
-            selected={selected}
-            onSelect={nav}
-            onSetRoot={handleSetRoot}
-            onLogout={logout}
-          />
-
-          <ResizableHandle withHandle />
-
-          <ResizablePanel defaultSize={72} minSize={40}>
-            <Inspector
-              path={selected}
-              currentUserId={authed!}
-              onDelete={handleDelete}
-              onAddComponent={handleAddComponent}
+      <NavigateProvider value={nav}>
+        <ConnectionBanner />
+        <div className="flex h-screen bg-background text-foreground overflow-hidden">
+          <ResizablePanelGroup orientation="horizontal" className="h-full">
+            <EditorSidebar
+              authed={authed!}
+              root={root}
+              selected={selected}
               onSelect={nav}
               onSetRoot={handleSetRoot}
+              onLogout={logout}
             />
-          </ResizablePanel>
-        </ResizablePanelGroup>
 
-        {addingComponentAt && (
-          <TypePicker
-            title="Add Component"
-            nameLabel="Component name"
-            action="Add"
-            autoName
-            onSelect={handlePickComponent}
-            onCancel={() => setAddingComponentAt(null)}
-          />
-        )}
-      </div>
-    </NavigateProvider>
+            <ResizableHandle withHandle />
+
+            <ResizablePanel defaultSize={72} minSize={40}>
+              <Inspector
+                path={selected}
+                currentUserId={authed!}
+                onDelete={handleDelete}
+                onAddComponent={handleAddComponent}
+                onSelect={nav}
+                onSetRoot={handleSetRoot}
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+
+          {addingComponentAt && (
+            <TypePicker
+              title="Add Component"
+              nameLabel="Component name"
+              action="Add"
+              autoName
+              onSelect={handlePickComponent}
+              onCancel={() => setAddingComponentAt(null)}
+            />
+          )}
+        </div>
+      </NavigateProvider>
     </RouteParamsContext>
   );
 };
 
 export const clientModules = [
-  declareClientModule('@treenx/mods/editor-shell/view', [
-    view(EditorShell, EditorShellView)
-  ])
+  declareClientModule('@treenx/mods/editor-shell/view', [view(EditorShell, EditorShellView)]),
 ];

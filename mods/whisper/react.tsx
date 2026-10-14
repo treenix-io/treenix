@@ -1,11 +1,11 @@
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Whisper channel view — checklist of transcribed audio notes
 
 import dayjs from 'dayjs';
 import { getComponent } from '@treenx/core';
-import { useTreeEffects,type View,useChildren } from '@treenx/react';
-import { WhisperChannel,WhisperMeta,WhisperText } from './types';
+import { useTreeEffects, type View, useChildren } from '@treenx/react';
+import { WhisperChannel, WhisperMeta, WhisperText } from './types';
 
 function transcriptionText(node: PresentationNode): string {
   const text = getComponent(node, WhisperText);
@@ -21,9 +21,9 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
 
   const checked = new Set<string>(checklist?.checked ?? []);
 
-  const transcriptions = children.filter(child => child.$type === 'whisper.transcription');
-  const items = transcriptions.filter(child => transcriptionText(child) !== '...');
-  const processing = transcriptions.filter(child => transcriptionText(child) === '...');
+  const transcriptions = children.filter((child) => child.$type === 'whisper.transcription');
+  const items = transcriptions.filter((child) => transcriptionText(child) !== '...');
+  const processing = transcriptions.filter((child) => transcriptionText(child) === '...');
 
   const toggle = (path: string) => {
     const next = new Set(checked);
@@ -34,7 +34,7 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
 
   return (
     <div className="node-default-view">
-      {items.map(child => {
+      {items.map((child) => {
         const text = transcriptionText(child);
         const name = child.$path.slice(child.$path.lastIndexOf('/') + 1);
         const meta = getComponent(child, WhisperMeta);
@@ -52,18 +52,17 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
               className="mt-0.5 shrink-0 w-4 h-4 p-0"
             />
             <div className="flex-1">
-              <div className={`text-[13px] leading-snug ${done ? 'line-through' : ''}`}>
-                {text}
-              </div>
+              <div className={`text-[13px] leading-snug ${done ? 'line-through' : ''}`}>{text}</div>
               <div className="text-[11px] text-[var(--text-3)] mt-1">
-                {name}{meta?.duration ? ` · ${meta.duration}s` : ''}
+                {name}
+                {meta?.duration ? ` · ${meta.duration}s` : ''}
               </div>
             </div>
           </label>
         );
       })}
 
-      {processing.map(child => {
+      {processing.map((child) => {
         const name = child.$path.slice(child.$path.lastIndexOf('/') + 1);
         return (
           <div
@@ -80,7 +79,7 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
       )}
     </div>
   );
-}
+};
 
 const TranscriptionRow: View<object> = ({ ctx }) => {
   const node = ctx!.node;
@@ -92,11 +91,15 @@ const TranscriptionRow: View<object> = ({ ctx }) => {
     <div className="flex items-start gap-3 px-3 py-2 rounded-lg border border-border/60 hover:border-border">
       <span className="text-sm shrink-0">🎙</span>
       <div className="flex-1 min-w-0">
-        {meta?.error
-          ? <div className="text-sm text-destructive">Ошибка расшифровки: {meta.error}</div>
-          : pending
-            ? <div className="text-sm text-muted-foreground animate-pulse">Расшифровка…</div>
-            : <div className="text-sm text-foreground whitespace-pre-wrap break-words">{text.content}</div>}
+        {meta?.error ? (
+          <div className="text-sm text-destructive">Ошибка расшифровки: {meta.error}</div>
+        ) : pending ? (
+          <div className="text-sm text-muted-foreground animate-pulse">Расшифровка…</div>
+        ) : (
+          <div className="text-sm text-foreground whitespace-pre-wrap break-words">
+            {text.content}
+          </div>
+        )}
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {meta?.transcribedAt ? dayjs(meta.transcribedAt).format('MMM D HH:mm') : ''}
           {meta?.duration ? ` · ${Math.round(meta.duration)}с` : ''}
@@ -109,6 +112,6 @@ const TranscriptionRow: View<object> = ({ ctx }) => {
 export const clientModules = [
   declareClientModule('@treenx/mods/whisper/react', [
     declareView('whisper.channel', 'react', ChannelView),
-    declareView('whisper.transcription', 'react:list', TranscriptionRow)
-  ])
+    declareView('whisper.transcription', 'react:list', TranscriptionRow),
+  ]),
 ];

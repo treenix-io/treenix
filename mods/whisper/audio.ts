@@ -4,11 +4,16 @@ import WaveFile from 'wavefile';
 
 // MIME allowlist → file extension; anything else is rejected at the route
 const MIME_EXT: Array<[string, string]> = [
-  ['mpeg', 'mp3'], ['mp3', 'mp3'],
-  ['ogg', 'ogg'], ['opus', 'ogg'],
+  ['mpeg', 'mp3'],
+  ['mp3', 'mp3'],
+  ['ogg', 'ogg'],
+  ['opus', 'ogg'],
   ['webm', 'webm'],
-  ['m4a', 'm4a'], ['mp4', 'm4a'], ['aac', 'm4a'],
-  ['wav', 'wav'], ['x-wav', 'wav'],
+  ['m4a', 'm4a'],
+  ['mp4', 'm4a'],
+  ['aac', 'm4a'],
+  ['wav', 'wav'],
+  ['x-wav', 'wav'],
 ];
 
 // Lazy-initialized pipelines keyed by model name
@@ -26,11 +31,10 @@ export function getTranscriber(model: string): Promise<AutomaticSpeechRecognitio
         decoder_model_merged: 'q4',
       },
     });
-    p.then(() => console.log(`[whisper] model ${modelId} ready`))
-      .catch((e: unknown) => {
-        console.error(`[whisper] model ${modelId} failed:`, e);
-        pipelines.delete(model); // allow retry on next request
-      });
+    p.then(() => console.log(`[whisper] model ${modelId} ready`)).catch((e: unknown) => {
+      console.error(`[whisper] model ${modelId} failed:`, e);
+      pipelines.delete(model); // allow retry on next request
+    });
     pipelines.set(model, p);
   }
   return p;
@@ -52,4 +56,3 @@ export function extForMime(mime: string): string | null {
   for (const [key, ext] of MIME_EXT) if (mime.includes(key)) return ext;
   return null;
 }
-

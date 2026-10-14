@@ -1,9 +1,9 @@
-import { useDroppable } from '@dnd-kit/core'
+import { useDroppable } from '@dnd-kit/core';
 
 export function DropZone({ id, active }: { id: string; active?: boolean }) {
-  const { setNodeRef, isOver } = useDroppable({ id })
+  const { setNodeRef, isOver } = useDroppable({ id });
 
-  if (!active) return null
+  if (!active) return null;
 
   return (
     <div
@@ -12,5 +12,5 @@ export function DropZone({ id, active }: { id: string; active?: boolean }) {
         isOver ? 'border-primary bg-primary/20' : 'border-[--border]'
       }`}
     />
-  )
+  );
 }

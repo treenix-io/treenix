@@ -4,7 +4,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Role determines prompt + tool policy. Uses metatron's invokeClaude for LLM.
 // Agent = node, tree = protocol.
 
-
 import { agentMethods } from '#agent/methods';
 
 // ── Active query registry ──
@@ -325,18 +324,24 @@ export interface AiChat {
   clear(): Promise<void>;
 }
 
-export const clientModules = [declareOpenModule('@treenx/mods/agent/types', [], [
-  declaredAiPlan,
-  declaredAiApproval,
-  declaredAiApprovals,
-  declaredAiPolicy,
-  declaredAiAgent,
-  declaredAiPool,
-  declaredAiAssignment,
-  declaredAiThread,
-  declaredAiChat,
-  declaredAiLog,
-  declaredAiRunStatus,
-  declaredAiCost,
-  declaredAiRun,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/agent/types',
+    [],
+    [
+      declaredAiPlan,
+      declaredAiApproval,
+      declaredAiApprovals,
+      declaredAiPolicy,
+      declaredAiAgent,
+      declaredAiPool,
+      declaredAiAssignment,
+      declaredAiThread,
+      declaredAiChat,
+      declaredAiLog,
+      declaredAiRunStatus,
+      declaredAiCost,
+      declaredAiRun,
+    ],
+  ),
+];

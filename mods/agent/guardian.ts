@@ -1,7 +1,7 @@
 // Pure tool-policy resolution and shell command classification.
 
 import { type PermissionRule } from '#metatron/permissions';
-import { globMatch,matchesAny } from '@treenx/core/glob';
+import { globMatch, matchesAny } from '@treenx/core/glob';
 
 // ── Specificity-aware policy resolution ──
 
@@ -19,8 +19,10 @@ function patternSpecificity(pattern: string): number {
 // Deny and escalate are unaffected — wildcards may only restrict, never grant.
 
 const MUTATING_TOOLS = new Set([
-  'mcp__treenix__set_node', 'mcp__treenix__remove_node',
-  'mcp__treenix__execute', 'mcp__treenix__deploy_prefab',
+  'mcp__treenix__set_node',
+  'mcp__treenix__remove_node',
+  'mcp__treenix__execute',
+  'mcp__treenix__deploy_prefab',
 ]);
 
 function subjectTool(s: string): string {
@@ -90,8 +92,10 @@ export type ToolPolicy = {
 
 const FALLBACK_POLICY: ToolPolicy = {
   allow: [
-    'mcp__treenix__get_node', 'mcp__treenix__list_children',
-    'mcp__treenix__catalog', 'mcp__treenix__describe_type',
+    'mcp__treenix__get_node',
+    'mcp__treenix__list_children',
+    'mcp__treenix__catalog',
+    'mcp__treenix__describe_type',
     'mcp__treenix__search_types',
     'mcp__treenix__execute:$schema',
   ],
@@ -102,9 +106,14 @@ const FALLBACK_POLICY: ToolPolicy = {
     'mcp__treenix__set_node:/guardian*',
     'mcp__treenix__remove_node:/guardian*',
     'mcp__treenix__execute:*:/guardian*',
-    'Bash:git checkout *', 'Bash:git checkout -- *',
-    'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
-    'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
+    'Bash:git checkout *',
+    'Bash:git checkout -- *',
+    'Bash:git reset --hard*',
+    'Bash:git push --force*',
+    'Bash:git clean*',
+    'Bash:rm -rf *',
+    'Bash:rm -r *',
+    'Bash:cat *.env*',
   ],
   escalate: ['mcp__treenix__set_node', 'mcp__treenix__execute:*', 'mcp__treenix__remove_node'],
 };
@@ -123,10 +132,6 @@ export function buildPermissionRules(_role: string): PermissionRule[] {
   return rules;
 }
 
-
-
-
-
 // ── Shell metacharacter detection ──
 // Commands containing these are not safe for word-based classification —
 // they can embed arbitrary sub-commands or redirect output.
@@ -144,22 +149,62 @@ export function hasShellMeta(cmd: string): boolean {
 // ── Bash command classification ──
 
 const BASH_AUTO = new Set([
-  'cd', 'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'file', 'which',
-  'grep', 'find', 'rg', 'tree', 'du', 'df', 'echo', 'printf', 'date', 'uname',
-  'git status', 'git log', 'git diff', 'git branch', 'git show', 'git remote',
-  'npm ls', 'npm info', 'npm view',
+  'cd',
+  'ls',
+  'pwd',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'file',
+  'which',
+  'grep',
+  'find',
+  'rg',
+  'tree',
+  'du',
+  'df',
+  'echo',
+  'printf',
+  'date',
+  'uname',
+  'git status',
+  'git log',
+  'git diff',
+  'git branch',
+  'git show',
+  'git remote',
+  'npm ls',
+  'npm info',
+  'npm view',
 ]);
 
 const BASH_SESSION = new Set([
-  'mkdir', 'touch', 'cp', 'mv',
-  'npm test', 'tsc',
-  'node', 'tsx', 'npx', 'npm run',
-  'git add', 'git commit', 'git stash', 'git fetch', 'git pull',
-  'npm install', 'npm ci', 'npm update',
+  'mkdir',
+  'touch',
+  'cp',
+  'mv',
+  'npm test',
+  'tsc',
+  'node',
+  'tsx',
+  'npx',
+  'npm run',
+  'git add',
+  'git commit',
+  'git stash',
+  'git fetch',
+  'git pull',
+  'npm install',
+  'npm ci',
+  'npm update',
 ]);
 
 const BASH_ESCALATE = new Set([
-  'git push', 'git merge', 'git rebase', 'git tag',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git tag',
   'npm publish',
   'docker',
 ]);
@@ -192,21 +237,59 @@ export function splitBashParts(cmd: string): string[] {
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i];
 
-    if (escaped) { cur += ch; escaped = false; continue; }
-    if (ch === '\\' && !inSingle) { cur += ch; escaped = true; continue; }
-    if (ch === "'" && !inDouble) { cur += ch; inSingle = !inSingle; continue; }
-    if (ch === '"' && !inSingle) { cur += ch; inDouble = !inDouble; continue; }
+    if (escaped) {
+      cur += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && !inSingle) {
+      cur += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === "'" && !inDouble) {
+      cur += ch;
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      cur += ch;
+      inDouble = !inDouble;
+      continue;
+    }
 
     if (!inSingle && !inDouble) {
-      if (ch === '|' && cmd[i + 1] === '|') { parts.push(cur); cur = ''; i++; continue; }
-      if (ch === '|') { parts.push(cur); cur = ''; continue; }
-      if (ch === '&' && cmd[i + 1] === '&') { parts.push(cur); cur = ''; i++; continue; }
-      if (ch === '&') { parts.push(cur); cur = ''; continue; }  // background operator
-      if (ch === ';') { parts.push(cur); cur = ''; continue; }
+      if (ch === '|' && cmd[i + 1] === '|') {
+        parts.push(cur);
+        cur = '';
+        i++;
+        continue;
+      }
+      if (ch === '|') {
+        parts.push(cur);
+        cur = '';
+        continue;
+      }
+      if (ch === '&' && cmd[i + 1] === '&') {
+        parts.push(cur);
+        cur = '';
+        i++;
+        continue;
+      }
+      if (ch === '&') {
+        parts.push(cur);
+        cur = '';
+        continue;
+      } // background operator
+      if (ch === ';') {
+        parts.push(cur);
+        cur = '';
+        continue;
+      }
     }
 
     cur += ch;
   }
   if (cur) parts.push(cur);
-  return parts.map(p => p.trim()).filter(Boolean);
+  return parts.map((p) => p.trim()).filter(Boolean);
 }

@@ -7,42 +7,50 @@ const defaultItems: SlashMenuItem[] = [
   {
     title: 'Heading 1',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
   },
   {
     title: 'Heading 2',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
   },
   {
     title: 'Heading 3',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
   },
   {
     title: 'Bullet List',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleBulletList().run(),
   },
   {
     title: 'Ordered List',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
   },
   {
     title: 'Code Block',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
   },
   {
     title: 'Quote',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
   },
   {
     title: 'Divider',
     group: 'Text',
-    command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
   },
   {
     title: 'Ref',
@@ -100,9 +108,7 @@ export const SlashCommand = Extension.create<any, { docPath: string }>({
         editor: this.editor,
         ...this.options.suggestion,
         items: ({ query }: { query: string }) =>
-          defaultItems.filter((item) =>
-            item.title.toLowerCase().includes(query.toLowerCase()),
-          ),
+          defaultItems.filter((item) => item.title.toLowerCase().includes(query.toLowerCase())),
         render: () => {
           let component: ReactRenderer<SlashMenuHandle>;
 

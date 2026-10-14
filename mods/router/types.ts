@@ -6,8 +6,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // prefix (e.g. /sys/routes/d with prefix='/docs', index='index' exposes
 // /docs/foo at /d/foo and /docs/index at /d).
 
-
-
 /** Routing hint. Attach to a /sys/routes/* node. */
 export class Route {
   /** When true, this route catches descendant URL paths (e.g. /sys/routes/t catches /t/anything). */
@@ -22,6 +20,4 @@ export class Route {
 
 const declaredTRoute = declareClientType('t.route', Route);
 
-export const clientModules = [declareOpenModule('@treenx/mods/router/types', [], [
-  declaredTRoute,
-])];
+export const clientModules = [declareOpenModule('@treenx/mods/router/types', [], [declaredTRoute])];

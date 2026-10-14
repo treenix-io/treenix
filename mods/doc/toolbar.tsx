@@ -15,19 +15,27 @@ import {
   Quote,
 } from 'lucide-react';
 
-function Btn({ active, onClick, title, children }: {
-  active?: boolean; onClick: () => void; title: string; children: React.ReactNode;
+function Btn({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active?: boolean;
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
 }) {
   return (
     <Button
       variant="ghost"
       size="sm"
-      onMouseDown={(e) => { e.preventDefault(); onClick(); }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onClick();
+      }}
       title={title}
-      className={cn(
-        'h-7 w-7 p-0',
-        active && 'bg-accent text-accent-foreground',
-      )}
+      className={cn('h-7 w-7 p-0', active && 'bg-accent text-accent-foreground')}
     >
       {children}
     </Button>
@@ -42,40 +50,80 @@ export function Toolbar({ editor }: { editor: Editor }) {
   const sz = 14;
   return (
     <div className="doc-toolbar flex items-center flex-wrap gap-0.5 px-1 py-1 mb-2 border-b border-border">
-      <Btn active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold (⌘B)">
+      <Btn
+        active={editor.isActive('bold')}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+        title="Bold (⌘B)"
+      >
         <Bold size={sz} />
       </Btn>
-      <Btn active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()} title="Italic (⌘I)">
+      <Btn
+        active={editor.isActive('italic')}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+        title="Italic (⌘I)"
+      >
         <Italic size={sz} />
       </Btn>
-      <Btn active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()} title="Inline code">
+      <Btn
+        active={editor.isActive('code')}
+        onClick={() => editor.chain().focus().toggleCode().run()}
+        title="Inline code"
+      >
         <Code size={sz} />
       </Btn>
 
       <Sep />
 
-      <Btn active={editor.isActive('heading', { level: 1 })} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} title="Heading 1">
+      <Btn
+        active={editor.isActive('heading', { level: 1 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+        title="Heading 1"
+      >
         <Heading1 size={sz} />
       </Btn>
-      <Btn active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading 2">
+      <Btn
+        active={editor.isActive('heading', { level: 2 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+        title="Heading 2"
+      >
         <Heading2 size={sz} />
       </Btn>
-      <Btn active={editor.isActive('heading', { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="Heading 3">
+      <Btn
+        active={editor.isActive('heading', { level: 3 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+        title="Heading 3"
+      >
         <Heading3 size={sz} />
       </Btn>
 
       <Sep />
 
-      <Btn active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()} title="Bullet list">
+      <Btn
+        active={editor.isActive('bulletList')}
+        onClick={() => editor.chain().focus().toggleBulletList().run()}
+        title="Bullet list"
+      >
         <List size={sz} />
       </Btn>
-      <Btn active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="Ordered list">
+      <Btn
+        active={editor.isActive('orderedList')}
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+        title="Ordered list"
+      >
         <ListOrdered size={sz} />
       </Btn>
-      <Btn active={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()} title="Quote">
+      <Btn
+        active={editor.isActive('blockquote')}
+        onClick={() => editor.chain().focus().toggleBlockquote().run()}
+        title="Quote"
+      >
         <Quote size={sz} />
       </Btn>
-      <Btn active={editor.isActive('codeBlock')} onClick={() => editor.chain().focus().toggleCodeBlock().run()} title="Code block">
+      <Btn
+        active={editor.isActive('codeBlock')}
+        onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+        title="Code block"
+      >
         <Code2 size={sz} />
       </Btn>
 

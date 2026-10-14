@@ -1,4 +1,4 @@
-import type { AiAgent,AiThread,AiPlan,AiPolicy } from '#agent/types';
+import type { AiAgent, AiThread, AiPlan, AiPolicy } from '#agent/types';
 
 export const agentMethods = {
   'ai.agent': {

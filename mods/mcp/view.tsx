@@ -20,12 +20,17 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
   const [fresh, setFresh] = useState<{ name: string; token: string } | null>(null);
 
   const parseGroups = (input: string) =>
-    input.split(',').map(s => s.trim()).filter(Boolean);
+    input
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
   const handleCreate = async () => {
     if (!name.trim() || !scopeInput.trim()) return;
     const result = await actions.create({
-      name: name.trim(), groups: parseGroups(groupsInput), scope: parseGroups(scopeInput),
+      name: name.trim(),
+      groups: parseGroups(groupsInput),
+      scope: parseGroups(scopeInput),
     });
     setFresh({ name: name.trim(), token: result.token });
     setName('');
@@ -48,15 +53,15 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
           className="flex-1 rounded bg-card px-3 py-1.5 text-sm text-foreground border border-border focus:border-border outline-none"
           placeholder="token name (e.g. claude-code)"
           value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleCreate()}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
         />
         <input
           className="w-64 rounded bg-card px-3 py-1.5 text-sm text-foreground border border-border focus:border-border outline-none"
           placeholder="groups (comma-separated, e.g. admins)"
           value={groupsInput}
-          onChange={e => setGroupsInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleCreate()}
+          onChange={(e) => setGroupsInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
         />
         <button
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
@@ -72,8 +77,8 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
         aria-label="Allowed paths"
         placeholder="allowed paths (comma-separated, e.g. /board, /docs)"
         value={scopeInput}
-        onChange={e => setScopeInput(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && handleCreate()}
+        onChange={(e) => setScopeInput(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
       />
 
       {fresh && (
@@ -103,22 +108,32 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
         <p className="text-sm text-muted-foreground">No tokens yet</p>
       ) : (
         <div className="space-y-2">
-          {children.map(child => {
+          {children.map((child) => {
             const token = getComponent(child, ApiToken)!;
             const tokenId = child.$path.slice(path.length + 1);
-            const userNode = users.find(u => u.$path === token.accountPath);
-            const userGroups = userNode === undefined
-              ? undefined : getComponent<{ list: string[] }>(userNode, 't.groups')!.list;
+            const userNode = users.find((u) => u.$path === token.accountPath);
+            const userGroups =
+              userNode === undefined
+                ? undefined
+                : getComponent<{ list: string[] }>(userNode, 't.groups')!.list;
             return (
-              <div key={child.$path} className="flex items-center justify-between rounded bg-card/50 px-3 py-2 border border-border/50">
+              <div
+                key={child.$path}
+                className="flex items-center justify-between rounded bg-card/50 px-3 py-2 border border-border/50"
+              >
                 <div className="space-y-1 min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                     <span>{token.name}</span>
                     {token.preview && (
-                      <code className="font-mono text-xs text-muted-foreground">{token.preview}</code>
+                      <code className="font-mono text-xs text-muted-foreground">
+                        {token.preview}
+                      </code>
                     )}
-                    {userGroups?.map(g => (
-                      <span key={g} className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground">
+                    {userGroups?.map((g) => (
+                      <span
+                        key={g}
+                        className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground"
+                      >
                         {g}
                       </span>
                     ))}
@@ -144,6 +159,6 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
 
 export const clientModules = [
   declareClientModule('@treenx/mods/mcp/view', [
-    declareView('t.api.tokens', 'react', ApiTokensView)
-  ])
+    declareView('t.api.tokens', 'react', ApiTokensView),
+  ]),
 ];

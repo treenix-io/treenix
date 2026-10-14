@@ -1,6 +1,6 @@
 import { minimd } from '@treenx/react';
 import { cn } from '@treenx/react';
-import { useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 // ── Structured log parser ──
 
@@ -47,8 +47,12 @@ function parseLog(raw: unknown): LogBlock[] {
     } else if (tag === 'result') {
       const nextBlock = BLOCK_RE.exec(rest);
       const content = inline
-        ? (nextBlock ? inline + '\n' + rest.slice(0, nextBlock.index) : inline + '\n' + rest)
-        : (nextBlock ? rest.slice(0, nextBlock.index) : rest);
+        ? nextBlock
+          ? inline + '\n' + rest.slice(0, nextBlock.index)
+          : inline + '\n' + rest
+        : nextBlock
+          ? rest.slice(0, nextBlock.index)
+          : rest;
       rest = nextBlock ? rest.slice(nextBlock.index) : '';
       blocks.push({ type: 'result', content: content.trim(), time });
     } else if (tag === 'interrupted') {
@@ -58,34 +62,52 @@ function parseLog(raw: unknown): LogBlock[] {
   return blocks;
 }
 
-
-
-
-
-
 // ── Code syntax highlighting ──
 // XXX: BAD one, use general lib
-const TOKEN = new RegExp([
-  '(\\/\\/[^\\n]*)',                                            // 0: comments
-  '(\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|`(?:[^`\\\\]|\\\\.)*`)', // 1: strings
-  '\\b(import|export|from|const|let|var|type|interface|class|function|async|await|return|if|else|for|of|in|while|new|throw|try|catch|finally|default|extends|implements|as|typeof|instanceof)\\b', // 2: keywords
-  '\\b(string|number|boolean|void|null|undefined|true|false|any|unknown|never|Promise|Record|Map|Set|Array)\\b', // 3: types
-  '(\\b\\d+(?:\\.\\d+)?\\b)',                                  // 4: numbers
-].join('|'), 'g');
+const TOKEN = new RegExp(
+  [
+    '(\\/\\/[^\\n]*)', // 0: comments
+    '(\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|`(?:[^`\\\\]|\\\\.)*`)', // 1: strings
+    '\\b(import|export|from|const|let|var|type|interface|class|function|async|await|return|if|else|for|of|in|while|new|throw|try|catch|finally|default|extends|implements|as|typeof|instanceof)\\b', // 2: keywords
+    '\\b(string|number|boolean|void|null|undefined|true|false|any|unknown|never|Promise|Record|Map|Set|Array)\\b', // 3: types
+    '(\\b\\d+(?:\\.\\d+)?\\b)', // 4: numbers
+  ].join('|'),
+  'g',
+);
 
-const TOKEN_CLS = ['text-muted-foreground', 'text-emerald-400', 'text-violet-400', 'text-sky-400', 'text-amber-400'];
+const TOKEN_CLS = [
+  'text-muted-foreground',
+  'text-emerald-400',
+  'text-violet-400',
+  'text-sky-400',
+  'text-amber-400',
+];
 
 function colorize(code: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let k = 0;
   for (const m of code.matchAll(TOKEN)) {
-    if (m.index! > last) nodes.push(<span key={k++} className="text-foreground">{code.slice(last, m.index!)}</span>);
-    const gi = m.slice(1).findIndex(g => g !== undefined);
-    nodes.push(<span key={k++} className={TOKEN_CLS[gi] || 'text-foreground'}>{m[0]}</span>);
+    if (m.index! > last)
+      nodes.push(
+        <span key={k++} className="text-foreground">
+          {code.slice(last, m.index!)}
+        </span>,
+      );
+    const gi = m.slice(1).findIndex((g) => g !== undefined);
+    nodes.push(
+      <span key={k++} className={TOKEN_CLS[gi] || 'text-foreground'}>
+        {m[0]}
+      </span>,
+    );
     last = m.index! + m[0].length;
   }
-  if (last < code.length) nodes.push(<span key={k++} className="text-foreground">{code.slice(last)}</span>);
+  if (last < code.length)
+    nodes.push(
+      <span key={k++} className="text-foreground">
+        {code.slice(last)}
+      </span>,
+    );
   return nodes;
 }
 
@@ -95,7 +117,14 @@ function CodeResult({ text }: { text: string }) {
       const ln = line.match(/^(\s*\d+→)(.*)/);
       return (
         <div key={i}>
-          {ln ? <><span className="text-muted-foreground/60 select-none">{ln[1]}</span>{colorize(ln[2])}</> : colorize(line)}
+          {ln ? (
+            <>
+              <span className="text-muted-foreground/60 select-none">{ln[1]}</span>
+              {colorize(ln[2])}
+            </>
+          ) : (
+            colorize(line)
+          )}
         </div>
       );
     });
@@ -120,7 +149,14 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (typeof value === 'number') return <span className="text-sky-400">{value}</span>;
   if (typeof value === 'string') {
     if (value.length > 200) {
-      return <CollapsibleJson label={`"${value.slice(0, 60)}…"  (${value.length})`} className="text-emerald-400">{value}</CollapsibleJson>;
+      return (
+        <CollapsibleJson
+          label={`"${value.slice(0, 60)}…"  (${value.length})`}
+          className="text-emerald-400"
+        >
+          {value}
+        </CollapsibleJson>
+      );
     }
     return <span className="text-emerald-400">"{value}"</span>;
   }
@@ -128,7 +164,11 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-muted-foreground">[]</span>;
     return (
-      <CollapsibleJson label={`Array(${value.length})`} className="text-muted-foreground" defaultOpen={depth < 2}>
+      <CollapsibleJson
+        label={`Array(${value.length})`}
+        className="text-muted-foreground"
+        defaultOpen={depth < 2}
+      >
         <div className="pl-3 border-l border-border/60">
           {value.map((item, i) => (
             <div key={i} className="flex gap-1">
@@ -145,7 +185,11 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
     const entries = Object.entries(value);
     if (entries.length === 0) return <span className="text-muted-foreground">{'{}'}</span>;
     return (
-      <CollapsibleJson label={`{${entries.length}}`} className="text-muted-foreground" defaultOpen={depth < 2}>
+      <CollapsibleJson
+        label={`{${entries.length}}`}
+        className="text-muted-foreground"
+        defaultOpen={depth < 2}
+      >
         <div className="pl-3 border-l border-border/60">
           {entries.map(([k, v]) => (
             <div key={k} className="flex gap-1">
@@ -161,16 +205,32 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   return <span className="text-muted-foreground">{String(value)}</span>;
 }
 
-function CollapsibleJson({ label, className, defaultOpen = false, children }: {
-  label: string; className?: string; defaultOpen?: boolean; children: React.ReactNode;
+function CollapsibleJson({
+  label,
+  className,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  className?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <span>
       <button onClick={() => setOpen(!open)} className={cn('hover:underline', className)}>
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
           className={cn('inline mr-0.5 transition-transform duration-100', open && 'rotate-90')}
-        ><path d="M9 18l6-6-6-6" /></svg>
+        >
+          <path d="M9 18l6-6-6-6" />
+        </svg>
         {label}
       </button>
       {open && <div className="mt-0.5">{children}</div>}
@@ -180,8 +240,11 @@ function CollapsibleJson({ label, className, defaultOpen = false, children }: {
 
 function JsonTree({ text, className }: { text: string; className?: string }) {
   const parsed = useMemo(() => {
-    try { return JSON.parse(text); }
-    catch { return null; }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
   }, [text]);
 
   if (parsed === null) return null;
@@ -194,7 +257,7 @@ function JsonTree({ text, className }: { text: string; className?: string }) {
 
 export function Md({ text, className }: { text: string; className?: string }) {
   const json = isJson(text);
-  const html = useMemo(() => json ? '' : minimd(text), [text, json]);
+  const html = useMemo(() => (json ? '' : minimd(text)), [text, json]);
 
   if (json) return <JsonTree text={text} className={className} />;
   return <div className={cn('minimd', className)} dangerouslySetInnerHTML={{ __html: html }} />;
@@ -211,7 +274,15 @@ function truncate(s: string, max = 80): string {
 // Height threshold: below this the label stays inline (left), above it goes on top
 const LABEL_TOP_THRESHOLD = 120;
 
-export function CollapsibleBlock({ label, labelClass, preview, children, wrap, forceOpen, defaultOpen }: {
+export function CollapsibleBlock({
+  label,
+  labelClass,
+  preview,
+  children,
+  wrap,
+  forceOpen,
+  defaultOpen,
+}: {
   label: React.ReactNode;
   labelClass?: string;
   preview?: string;
@@ -244,18 +315,25 @@ export function CollapsibleBlock({ label, labelClass, preview, children, wrap, f
           'flex items-center gap-1.5 px-2 py-1 text-left text-xs font-medium transition-colors rounded shrink-0',
           isOpen && !labelTop && 'w-auto',
           !isOpen && 'w-full',
-          labelClass
+          labelClass,
         )}
       >
         <svg
-          width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
           className={cn('shrink-0 transition-transform duration-150', isOpen && 'rotate-90')}
         >
           <path d="M9 18l6-6-6-6" />
         </svg>
         {label}
         {!isOpen && preview && (
-          <span className="text-muted-foreground font-mono text-[10px] truncate ml-1 flex-1">{preview}</span>
+          <span className="text-muted-foreground font-mono text-[10px] truncate ml-1 flex-1">
+            {preview}
+          </span>
         )}
       </button>
       {isOpen && (
@@ -264,7 +342,7 @@ export function CollapsibleBlock({ label, labelClass, preview, children, wrap, f
           className={cn(
             'py-1 text-xs leading-relaxed max-h-[40vh] overflow-y-auto flex-1 min-w-0',
             labelTop ? 'pl-4 pr-1' : 'pl-2 pr-1',
-            wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre overflow-x-auto'
+            wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre overflow-x-auto',
           )}
         >
           {children}
@@ -289,14 +367,16 @@ export function LogRenderer({ text, className }: { text: string; className?: str
 
   if (!blocks.length) return <pre className={className}>No output yet</pre>;
 
-  const hasCollapsible = blocks.some(b => b.type === 'tool' || b.type === 'result' || b.type === 'thinking');
+  const hasCollapsible = blocks.some(
+    (b) => b.type === 'tool' || b.type === 'result' || b.type === 'thinking',
+  );
 
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       <div className="flex justify-end gap-1 px-1">
         {hasCollapsible && (
           <button
-            onClick={() => setExpandAll(prev => !prev)}
+            onClick={() => setExpandAll((prev) => !prev)}
             className="text-[11px] text-muted-foreground hover:text-muted-foreground transition-colors font-mono px-1.5 py-0.5 rounded border border-border/60 hover:border-border"
           >
             {expandAll ? 'fold' : 'unfold'}
@@ -315,9 +395,7 @@ export function LogRenderer({ text, className }: { text: string; className?: str
 
         switch (block.type) {
           case 'text':
-            return (
-              <Md key={i} text={block.content} className="text-foreground text-sm" />
-            );
+            return <Md key={i} text={block.content} className="text-foreground text-sm" />;
 
           case 'tool':
             return (
@@ -326,14 +404,22 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 wrap={wrap}
                 forceOpen={expandAll}
                 defaultOpen={isRecent}
-                label={<span className="text-sky-400 font-mono truncate">{block.name}{block.time && <span className="text-sky-400/40 ml-2 text-[10px]">{block.time}</span>}</span>}
+                label={
+                  <span className="text-sky-400 font-mono truncate">
+                    {block.name}
+                    {block.time && (
+                      <span className="text-sky-400/40 ml-2 text-[10px]">{block.time}</span>
+                    )}
+                  </span>
+                }
                 labelClass="bg-sky-500/8 hover:bg-sky-500/12 text-sky-400/80"
                 preview={truncate(block.input)}
               >
-                {isJson(block.input)
-                  ? <JsonTree text={block.input} className="text-muted-foreground" />
-                  : <pre className="text-muted-foreground font-mono text-[11px]">{block.input}</pre>
-                }
+                {isJson(block.input) ? (
+                  <JsonTree text={block.input} className="text-muted-foreground" />
+                ) : (
+                  <pre className="text-muted-foreground font-mono text-[11px]">{block.input}</pre>
+                )}
               </CollapsibleBlock>
             );
 
@@ -344,16 +430,24 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 wrap={wrap}
                 forceOpen={expandAll}
                 defaultOpen={isRecent}
-                label={<span className="text-emerald-400">result{block.time && <span className="text-emerald-400/40 ml-2 text-[10px]">{block.time}</span>}</span>}
+                label={
+                  <span className="text-emerald-400">
+                    result
+                    {block.time && (
+                      <span className="text-emerald-400/40 ml-2 text-[10px]">{block.time}</span>
+                    )}
+                  </span>
+                }
                 labelClass="bg-emerald-500/8 hover:bg-emerald-500/12 text-emerald-400/80"
                 preview={truncate(block.content)}
               >
-                {isJson(block.content)
-                  ? <JsonTree text={block.content} className="text-muted-foreground" />
-                  : /^\s*\d+→/.test(block.content)
-                    ? <CodeResult text={block.content} />
-                    : <Md text={block.content} className="text-muted-foreground text-xs" />
-                }
+                {isJson(block.content) ? (
+                  <JsonTree text={block.content} className="text-muted-foreground" />
+                ) : /^\s*\d+→/.test(block.content) ? (
+                  <CodeResult text={block.content} />
+                ) : (
+                  <Md text={block.content} className="text-muted-foreground text-xs" />
+                )}
               </CollapsibleBlock>
             );
 
@@ -364,7 +458,16 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 wrap={wrap}
                 forceOpen={expandAll}
                 defaultOpen={isRecent}
-                label={<span className="text-amber-400/70 italic">thinking{block.time && <span className="text-amber-400/40 ml-2 text-[10px] not-italic">{block.time}</span>}</span>}
+                label={
+                  <span className="text-amber-400/70 italic">
+                    thinking
+                    {block.time && (
+                      <span className="text-amber-400/40 ml-2 text-[10px] not-italic">
+                        {block.time}
+                      </span>
+                    )}
+                  </span>
+                }
                 labelClass="bg-amber-500/5 hover:bg-amber-500/10 text-amber-400/60"
                 preview={truncate(block.content)}
               >
@@ -374,10 +477,17 @@ export function LogRenderer({ text, className }: { text: string; className?: str
 
           case 'interrupted':
             return (
-              <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div
+                key={i}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20"
+              >
                 <span className="w-2 h-2 rounded-sm bg-red-400" />
                 <span className="text-[11px] text-red-400 font-medium">Interrupted</span>
-                {block.time && <span className="text-[10px] text-red-400/40 ml-auto font-mono">{block.time}</span>}
+                {block.time && (
+                  <span className="text-[10px] text-red-400/40 ml-auto font-mono">
+                    {block.time}
+                  </span>
+                )}
               </div>
             );
         }

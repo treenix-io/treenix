@@ -1,7 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 /** Treenix tree and type-catalog tools exposed through the generic MCP adapter. */
 export class TreenixMcpTools {
   /** @read @description Read a node by path. Returns full untruncated values. */
@@ -90,6 +89,6 @@ export class TreenixMcpTools {
 }
 const declaredMcpTreenix = declareClientType('mcp.treenix', TreenixMcpTools);
 
-export const clientModules = [declareOpenModule('@treenx/mods/mcp/treenix-tool-types', [], [
-  declaredMcpTreenix,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/mcp/treenix-tool-types', [], [declaredMcpTreenix]),
+];

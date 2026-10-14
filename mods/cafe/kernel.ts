@@ -8,15 +8,19 @@ import { cafeSeed } from '#cafe/seed-data';
 
 export default function createNativeCafe(): NativeModuleDeployment {
   return {
-    manifest: nativeClassModule('@treenx/mods/cafe', {
-      'cafe.mail': CafeMailService,
-      'cafe.contact': CafeContact,
-    }, readSchemasFromDir(fileURLToPath(new URL('./schemas', import.meta.url)))),
-    seeds: nativeSeed(
-    'cafe',
-    cafeSeed.map((node) =>
-      node.$type === 'cafe.contact' ? { ...new CafeContact(), ...node } : node,
+    manifest: nativeClassModule(
+      '@treenx/mods/cafe',
+      {
+        'cafe.mail': CafeMailService,
+        'cafe.contact': CafeContact,
+      },
+      readSchemasFromDir(fileURLToPath(new URL('./schemas', import.meta.url))),
     ),
-  ),
+    seeds: nativeSeed(
+      'cafe',
+      cafeSeed.map((node) =>
+        node.$type === 'cafe.contact' ? { ...new CafeContact(), ...node } : node,
+      ),
+    ),
   };
 }

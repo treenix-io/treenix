@@ -55,16 +55,14 @@ it(
               async handler(ctx) {
                 const worker = (await ctx.read.read({ node: '/worker' })).copies[0];
                 if ('error' in worker) throw worker.error;
-                const created = z
-                  .object({ path: z.string() })
-                  .parse(
-                    await ctx.act({
-                      path: '/branches',
-                      action: 'create',
-                      args: { base: '/work', ownerPath: '/worker', title: 'worker task' },
-                      key: 'create',
-                    }),
-                  );
+                const created = z.object({ path: z.string() }).parse(
+                  await ctx.act({
+                    path: '/branches',
+                    action: 'create',
+                    args: { base: '/work', ownerPath: '/worker', title: 'worker task' },
+                    key: 'create',
+                  }),
+                );
                 workspace = `${created.path}/tree`;
                 const result = await ctx.act({
                   path: '/worker',

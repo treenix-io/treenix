@@ -23,9 +23,14 @@ Workflow:
    Watch status and conflicts on the branch node.`;
 
 const branchesRoot = {
-  ...makeNode('branches', 't.branches', {}, {
-    description: { $type: 't.description', text: WORKFLOW },
-  }),
+  ...makeNode(
+    'branches',
+    't.branches',
+    {},
+    {
+      description: { $type: 't.description', text: WORKFLOW },
+    },
+  ),
   $acl: [
     { g: 'admins', p: R | W | A },
     { g: 'agents', p: R | W | A },

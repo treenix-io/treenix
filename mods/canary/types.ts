@@ -1,7 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 export class CanaryItem {
   value = 0;
   label = 'canary';
@@ -17,6 +16,6 @@ export class CanaryItem {
 
 const declaredCanaryItem = declareClientType('canary.item', CanaryItem);
 
-export const clientModules = [declareOpenModule('@treenx/mods/canary/types', [], [
-  declaredCanaryItem,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/canary/types', [], [declaredCanaryItem]),
+];

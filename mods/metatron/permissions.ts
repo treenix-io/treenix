@@ -8,8 +8,8 @@
 export type PermissionPolicy = 'allow' | 'ask-once' | 'ask-always' | 'deny';
 
 export type PermissionRule = {
-  tool: string;         // glob pattern: 'mcp__treenix__*', '*'
-  pathPattern: string;  // optional input.path pattern
+  tool: string; // glob pattern: 'mcp__treenix__*', '*'
+  pathPattern: string; // optional input.path pattern
   policy: PermissionPolicy;
 };
 
@@ -34,12 +34,10 @@ export function evaluatePermission(
   toolName: string,
   input: unknown,
 ): PermissionPolicy | null {
-  const inputPath = (input && typeof input === 'object' && 'path' in input)
-    ? String(input.path)
-    : '';
+  const inputPath = input && typeof input === 'object' && 'path' in input ? String(input.path) : '';
 
   // Find all matching rules
-  const matches = rules.filter(r => {
+  const matches = rules.filter((r) => {
     if (!globMatch(r.tool, toolName)) return false;
     if (r.pathPattern && inputPath && !globMatch(r.pathPattern, inputPath)) return false;
     return true;
@@ -48,7 +46,12 @@ export function evaluatePermission(
   if (!matches.length) return null; // no rule matched — caller decides default
 
   // Sort by specificity (most specific first), then by deny > ask > allow priority
-  const policyPriority: Record<string, number> = { deny: 3, 'ask-always': 2, 'ask-once': 1, allow: 0 };
+  const policyPriority: Record<string, number> = {
+    deny: 3,
+    'ask-always': 2,
+    'ask-once': 1,
+    allow: 0,
+  };
 
   matches.sort((a, b) => {
     const specDiff = ruleSpecificity(b) - ruleSpecificity(a);

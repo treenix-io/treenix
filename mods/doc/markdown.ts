@@ -191,10 +191,14 @@ function parseTreenixEmbed(body: string): TiptapNode | null {
   if (typeof $query === 'string' && typeof $ref === 'string') return null;
 
   if (typeof $query === 'string') {
-    const where = (data.$where && typeof data.$where === 'object' && !Array.isArray(data.$where))
-      ? (data.$where as Record<string, unknown>)
-      : {};
-    const filters = Object.entries(where).map(([field, value]) => ({ field, value: String(value) }));
+    const where =
+      data.$where && typeof data.$where === 'object' && !Array.isArray(data.$where)
+        ? (data.$where as Record<string, unknown>)
+        : {};
+    const filters = Object.entries(where).map(([field, value]) => ({
+      field,
+      value: String(value),
+    }));
     return {
       type: 'queryBlock',
       attrs: {
@@ -207,9 +211,10 @@ function parseTreenixEmbed(body: string): TiptapNode | null {
   }
 
   if (typeof $ref === 'string' || typeof $type === 'string') {
-    const props = (data.$props && typeof data.$props === 'object' && !Array.isArray(data.$props))
-      ? (data.$props as Record<string, unknown>)
-      : {};
+    const props =
+      data.$props && typeof data.$props === 'object' && !Array.isArray(data.$props)
+        ? (data.$props as Record<string, unknown>)
+        : {};
     return {
       type: 'treenixBlock',
       attrs: {
@@ -248,7 +253,9 @@ export function resolveLinkPath(href: string, basePath?: string): string | null 
   if (path.startsWith('/')) return path;
   if (!basePath) return null;
   // Resolve relative against parent dir of basePath
-  const dir = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath.slice(0, basePath.lastIndexOf('/'));
+  const dir = basePath.endsWith('/')
+    ? basePath.slice(0, -1)
+    : basePath.slice(0, basePath.lastIndexOf('/'));
   const segments = (dir + '/' + path).split('/');
   const stack: string[] = [];
   for (const seg of segments) {
@@ -268,7 +275,10 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
     const line = lines[i];
 
     // Empty line → skip
-    if (!line.trim()) { i++; continue; }
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
 
     // Heading. Allow empty title (e.g. "## ") so we always advance — otherwise
     // the paragraph fallback below skips heading-like lines and we infinite-loop.
@@ -343,7 +353,11 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
     // Bullet list
     if (/^[-*]\s/.test(line.trimStart())) {
       const items: TiptapNode[] = [];
-      while (i < lines.length && /^[-*]\s/.test(lines[i].trimStart()) && !/^[-*]\s\[[x ]\]\s/i.test(lines[i].trimStart())) {
+      while (
+        i < lines.length &&
+        /^[-*]\s/.test(lines[i].trimStart()) &&
+        !/^[-*]\s\[[x ]\]\s/i.test(lines[i].trimStart())
+      ) {
         const text = lines[i].trimStart().replace(/^[-*]\s+/, '');
         items.push({
           type: 'listItem',
@@ -395,7 +409,10 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
       const dataRows = tableLines.filter((r) => !/^\|[-\s|:]+\|$/.test(r));
       if (dataRows.length) {
         const tiptapRows: TiptapNode[] = dataRows.map((row, rowIdx) => {
-          const cells = row.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+          const cells = row
+            .replace(/^\||\|$/g, '')
+            .split('|')
+            .map((c) => c.trim());
           const cellType = rowIdx === 0 ? 'tableHeader' : 'tableCell';
           return {
             type: 'tableRow',
@@ -413,7 +430,17 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
 
     // Paragraph (default)
     const paraLines: string[] = [];
-    while (i < lines.length && lines[i].trim() && !lines[i].match(/^#{1,6}\s/) && !lines[i].match(/^[-*]\s/) && !lines[i].match(/^\d+\.\s/) && !lines[i].trimStart().startsWith('```') && !lines[i].trimStart().startsWith('> ') && !lines[i].trimStart().startsWith('|') && !/^---+$/.test(lines[i].trim())) {
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !lines[i].match(/^#{1,6}\s/) &&
+      !lines[i].match(/^[-*]\s/) &&
+      !lines[i].match(/^\d+\.\s/) &&
+      !lines[i].trimStart().startsWith('```') &&
+      !lines[i].trimStart().startsWith('> ') &&
+      !lines[i].trimStart().startsWith('|') &&
+      !/^---+$/.test(lines[i].trim())
+    ) {
       paraLines.push(lines[i]);
       i++;
     }
@@ -454,7 +481,11 @@ function parseInline(text: string, basePath?: string, parentMarks: Mark[] = []):
 
   function pushPlain(s: string) {
     if (!s) return;
-    nodes.push(parentMarks.length ? { type: 'text', text: s, marks: parentMarks } : { type: 'text', text: s });
+    nodes.push(
+      parentMarks.length
+        ? { type: 'text', text: s, marks: parentMarks }
+        : { type: 'text', text: s },
+    );
   }
 
   for (const match of text.matchAll(re)) {

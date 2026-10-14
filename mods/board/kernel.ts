@@ -7,8 +7,13 @@ const manifest: ModuleManifest = { id: '@treenx/mods/board', types: [], security
 
 /** Install the Board prefab; Plan owns the combined Board and Plan native actions. */
 export default function createNativeBoardSeeds(): NativeModuleDeployment {
-  const nodes = boardSeed.map(node => node['#mount'] === undefined ? node : {
-    ...node, '#mount': { ...node['#mount'], pattern: '' },
-  });
+  const nodes = boardSeed.map((node) =>
+    node['#mount'] === undefined
+      ? node
+      : {
+          ...node,
+          '#mount': { ...node['#mount'], pattern: '' },
+        },
+  );
   return { manifest, seeds: nativeSeed('board', nodes) };
 }

@@ -16,13 +16,19 @@ type Props = {
   placeholder?: string;
 };
 
-export function TStringInput({ value = {}, onChange, langs = ['ru', 'en'], rows = 3, placeholder }: Props) {
+export function TStringInput({
+  value = {},
+  onChange,
+  langs = ['ru', 'en'],
+  rows = 3,
+  placeholder,
+}: Props) {
   const [activeLang, setActiveLang] = useState(langs[0] ?? 'ru');
 
   return (
     <div>
       <div className="flex gap-0.5 mb-1">
-        {langs.map(lang => (
+        {langs.map((lang) => (
           <Button
             key={lang}
             type="button"
@@ -46,7 +52,7 @@ export function TStringInput({ value = {}, onChange, langs = ['ru', 'en'], rows 
         rows={rows}
         placeholder={placeholder ?? `Text (${activeLang})`}
         value={value[activeLang] ?? ''}
-        onChange={e => onChange({ [activeLang]: e.target.value })}
+        onChange={(e) => onChange({ [activeLang]: e.target.value })}
         className="resize-none"
       />
     </div>
@@ -54,12 +60,17 @@ export function TStringInput({ value = {}, onChange, langs = ['ru', 'en'], rows 
 }
 
 /** Single-line TString input */
-export function TStringLineInput({ value = {}, onChange, langs = ['ru', 'en'], placeholder }: Omit<Props, 'rows'>) {
+export function TStringLineInput({
+  value = {},
+  onChange,
+  langs = ['ru', 'en'],
+  placeholder,
+}: Omit<Props, 'rows'>) {
   const [activeLang, setActiveLang] = useState(langs[0] ?? 'ru');
 
   return (
     <div className="flex items-center gap-1 border border-input rounded-md overflow-hidden bg-background">
-      {langs.map(lang => (
+      {langs.map((lang) => (
         <Button
           key={lang}
           type="button"
@@ -80,7 +91,7 @@ export function TStringLineInput({ value = {}, onChange, langs = ['ru', 'en'], p
         className="flex-1 border-0 shadow-none focus-visible:ring-0"
         placeholder={placeholder ?? `Text (${activeLang})`}
         value={value[activeLang] ?? ''}
-        onChange={e => onChange({ [activeLang]: e.target.value })}
+        onChange={(e) => onChange({ [activeLang]: e.target.value })}
       />
     </div>
   );
@@ -89,6 +100,6 @@ export function TStringLineInput({ value = {}, onChange, langs = ['ru', 'en'], p
 /** Get first non-empty TString value for display */
 export function tstringPreview(ts: TString | undefined, maxLen = 40): string {
   if (!ts) return '';
-  const text = ts.ru || ts.en || Object.values(ts).find(v => v) || '';
+  const text = ts.ru || ts.en || Object.values(ts).find((v) => v) || '';
   return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
 }

@@ -82,20 +82,17 @@ describe('mdToTiptap', () => {
   // "RangeError: Empty text nodes are not allowed", which kills the editor
   // when DocPageView tries to setContent on a doc that contains them.
   it('never produces empty text nodes', () => {
-    const samples = [
-      '',
-      '# ',
-      '## \n\nbody',
-      '\n\n\n',
-      '> \n> ',
-      '- \n- item',
-    ];
+    const samples = ['', '# ', '## \n\nbody', '\n\n\n', '> \n> ', '- \n- item'];
     for (const md of samples) {
       const doc = mdToTiptap(md);
       const stack: TiptapNode[] = [doc];
       while (stack.length) {
         const n = stack.pop()!;
-        if (n.type === 'text') assert.ok(n.text && n.text.length > 0, `empty text node from input: ${JSON.stringify(md)}`);
+        if (n.type === 'text')
+          assert.ok(
+            n.text && n.text.length > 0,
+            `empty text node from input: ${JSON.stringify(md)}`,
+          );
         if (n.content) stack.push(...n.content);
       }
     }
@@ -106,7 +103,9 @@ describe('tiptapToMd', () => {
   it('converts heading', () => {
     const doc: TiptapNode = {
       type: 'doc',
-      content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Title' }] }],
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Title' }] },
+      ],
     };
     assert.equal(tiptapToMd(doc), '## Title');
   });
@@ -114,13 +113,15 @@ describe('tiptapToMd', () => {
   it('converts paragraph with marks', () => {
     const doc: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'paragraph',
-        content: [
-          { type: 'text', text: 'Hello ' },
-          { type: 'text', text: 'world', marks: [{ type: 'bold' }] },
-        ],
-      }],
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Hello ' },
+            { type: 'text', text: 'world', marks: [{ type: 'bold' }] },
+          ],
+        },
+      ],
     };
     assert.equal(tiptapToMd(doc), 'Hello **world**');
   });
@@ -128,13 +129,21 @@ describe('tiptapToMd', () => {
   it('converts bullet list', () => {
     const doc: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'bulletList',
-        content: [
-          { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }] },
-          { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] },
-        ],
-      }],
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }],
+            },
+          ],
+        },
+      ],
     };
     assert.equal(tiptapToMd(doc), '- a\n- b');
   });
@@ -142,7 +151,13 @@ describe('tiptapToMd', () => {
   it('converts code block', () => {
     const doc: TiptapNode = {
       type: 'doc',
-      content: [{ type: 'codeBlock', attrs: { language: 'js' }, content: [{ type: 'text', text: 'x = 1' }] }],
+      content: [
+        {
+          type: 'codeBlock',
+          attrs: { language: 'js' },
+          content: [{ type: 'text', text: 'x = 1' }],
+        },
+      ],
     };
     assert.equal(tiptapToMd(doc), '```js\nx = 1\n```');
   });
@@ -180,24 +195,15 @@ describe('resolveLinkPath', () => {
   });
 
   it('resolves ../ relative against grandparent', () => {
-    assert.equal(
-      resolveLinkPath('../sibling.md', '/docs/public/index.md'),
-      '/docs/sibling.md',
-    );
+    assert.equal(resolveLinkPath('../sibling.md', '/docs/public/index.md'), '/docs/sibling.md');
   });
 
   it('resolves bare relative as ./ relative', () => {
-    assert.equal(
-      resolveLinkPath('foo.md', '/docs/index.md'),
-      '/docs/foo.md',
-    );
+    assert.equal(resolveLinkPath('foo.md', '/docs/index.md'), '/docs/foo.md');
   });
 
   it('strips query and fragment from href', () => {
-    assert.equal(
-      resolveLinkPath('./x.md?v=1#anchor', '/docs/a.md'),
-      '/docs/x.md',
-    );
+    assert.equal(resolveLinkPath('./x.md?v=1#anchor', '/docs/a.md'), '/docs/x.md');
   });
 
   it('returns null for relative without basePath', () => {
@@ -229,7 +235,10 @@ describe('mdToTiptap link parsing', () => {
     assert.equal(hasNodeLink, false);
     const linkNode = para?.content?.find((n) => n.marks?.some((m) => m.type === 'link'));
     assert.ok(linkNode, 'expected a regular link');
-    assert.equal(linkNode!.marks!.find((m) => m.type === 'link')?.attrs?.href, 'https://example.com');
+    assert.equal(
+      linkNode!.marks!.find((m) => m.type === 'link')?.attrs?.href,
+      'https://example.com',
+    );
     const text = para?.content?.map((n) => n.text).join('') ?? '';
     assert.ok(text.includes('docs'));
   });
@@ -250,9 +259,7 @@ describe('mdToTiptap link parsing', () => {
   it('parses link nested inside bold', () => {
     const doc = mdToTiptap('- **[Storage](./types.md#storage)** — note', '/docs/index.md');
     const para = doc.content?.[0]?.content?.[0]?.content?.[0]; // bulletList → listItem → paragraph
-    const linkNode = para?.content?.find((n) =>
-      n.marks?.some((m) => m.type === 'nodeLink'),
-    );
+    const linkNode = para?.content?.find((n) => n.marks?.some((m) => m.type === 'nodeLink'));
     assert.ok(linkNode, 'expected a link inside bold');
     assert.equal(linkNode!.text, 'Storage');
     const markTypes = (linkNode!.marks ?? []).map((m) => m.type).sort();
@@ -274,9 +281,8 @@ describe('mdToTiptap link parsing', () => {
   it('parses bold marker inside link text', () => {
     const doc = mdToTiptap('see [**bold link**](./types.md) here', '/docs/index.md');
     const para = doc.content?.[0];
-    const boldLink = para?.content?.find((n) =>
-      n.marks?.some((m) => m.type === 'bold') &&
-      n.marks?.some((m) => m.type === 'nodeLink'),
+    const boldLink = para?.content?.find(
+      (n) => n.marks?.some((m) => m.type === 'bold') && n.marks?.some((m) => m.type === 'nodeLink'),
     );
     assert.ok(boldLink, 'link text should preserve bold mark');
     assert.equal(boldLink!.text, 'bold link');
@@ -307,7 +313,10 @@ describe('roundtrip md → tiptap → md', () => {
     const original = 'See [docs](https://example.com/path?q=1).';
     const tiptap = mdToTiptap(original);
     const result = tiptapToMd(tiptap);
-    assert.ok(result.includes('[docs](https://example.com/path?q=1)'), `expected external href preserved, got: ${result}`);
+    assert.ok(
+      result.includes('[docs](https://example.com/path?q=1)'),
+      `expected external href preserved, got: ${result}`,
+    );
   });
 });
 
@@ -321,7 +330,10 @@ describe('nodeLink href preservation', () => {
     const basePath = '/docs/public/index.md';
     const tiptap = mdToTiptap(original, basePath);
     const result = tiptapToMd(tiptap, basePath);
-    assert.ok(result.includes('[Types](./concepts/types.md)'), `expected relative href preserved, got: ${result}`);
+    assert.ok(
+      result.includes('[Types](./concepts/types.md)'),
+      `expected relative href preserved, got: ${result}`,
+    );
     assert.ok(!result.includes('treenix:'), 'treenix: scheme must not appear in encoded output');
   });
 
@@ -339,10 +351,18 @@ describe('nodeLink href preservation', () => {
     // Encode falls back to the absolute path — still valid markdown, no `treenix:`.
     const tiptap: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'paragraph',
-        content: [{ type: 'text', text: 'See it', marks: [{ type: 'nodeLink', attrs: { path: '/notes/x' } }] }],
-      }],
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'See it',
+              marks: [{ type: 'nodeLink', attrs: { path: '/notes/x' } }],
+            },
+          ],
+        },
+      ],
     };
     const result = tiptapToMd(tiptap);
     assert.ok(result.includes('[See it](/notes/x)'));
@@ -354,10 +374,20 @@ describe('nodeLink href preservation', () => {
     // would resolve to. We MUST NOT emit the stale href.
     const tiptap: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'paragraph',
-        content: [{ type: 'text', text: 'X', marks: [{ type: 'nodeLink', attrs: { path: '/docs/new.md', sourceHref: './old.md' } }] }],
-      }],
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'X',
+              marks: [
+                { type: 'nodeLink', attrs: { path: '/docs/new.md', sourceHref: './old.md' } },
+              ],
+            },
+          ],
+        },
+      ],
     };
     const result = tiptapToMd(tiptap, '/docs/index.md');
     assert.ok(result.includes('[X](/docs/new.md)'), `expected absolute fallback, got: ${result}`);
@@ -369,7 +399,10 @@ describe('nodeLink href preservation', () => {
     const basePath = '/docs/a.md';
     const tiptap = mdToTiptap(original, basePath);
     const result = tiptapToMd(tiptap, basePath);
-    assert.ok(result.includes('[t](./x.md?v=1#anchor)'), `expected query+fragment preserved, got: ${result}`);
+    assert.ok(
+      result.includes('[t](./x.md?v=1#anchor)'),
+      `expected query+fragment preserved, got: ${result}`,
+    );
   });
 });
 
@@ -465,29 +498,36 @@ describe('treenix fenced embed', () => {
     // a full encode/decode cycle.
     const tiptap: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'treenixBlock',
-        attrs: {
-          type: 'chart.area',
-          ref: null,
-          context: 'react',
-          props: { style: { color: 'red', size: 12 }, height: 200 },
+      content: [
+        {
+          type: 'treenixBlock',
+          attrs: {
+            type: 'chart.area',
+            ref: null,
+            context: 'react',
+            props: { style: { color: 'red', size: 12 }, height: 200 },
+          },
         },
-      }],
+      ],
     };
     const md = tiptapToMd(tiptap);
     const re = mdToTiptap(md);
-    assert.deepEqual(re.content?.[0]?.attrs?.props, { style: { color: 'red', size: 12 }, height: 200 });
+    assert.deepEqual(re.content?.[0]?.attrs?.props, {
+      style: { color: 'red', size: 12 },
+      height: 200,
+    });
   });
 
   it('emits no $context line when context is the default react', () => {
     // Defaults stay implicit — keeps the wire format compact and the diff minimal.
     const tiptap: TiptapNode = {
       type: 'doc',
-      content: [{
-        type: 'treenixBlock',
-        attrs: { type: 'x.y', ref: null, props: {}, context: 'react' },
-      }],
+      content: [
+        {
+          type: 'treenixBlock',
+          attrs: { type: 'x.y', ref: null, props: {}, context: 'react' },
+        },
+      ],
     };
     const md = tiptapToMd(tiptap);
     assert.ok(!md.includes('$context'), `default context should be implicit, got: ${md}`);

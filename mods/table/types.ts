@@ -1,14 +1,13 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 export type ColumnConfig = {
-  field: string
-  label?: string
-  visible?: boolean
-  width?: number
-  filter?: string
-}
+  field: string;
+  label?: string;
+  visible?: boolean;
+  width?: number;
+  filter?: string;
+};
 
 /** Table view — paginates children, auto-columns from schema, per-column filters */
 export class UITable {
@@ -23,6 +22,4 @@ export class UITable {
 
 const declaredUiTable = declareClientType('ui.table', UITable);
 
-export const clientModules = [declareOpenModule('@treenx/mods/table/types', [], [
-  declaredUiTable,
-])];
+export const clientModules = [declareOpenModule('@treenx/mods/table/types', [], [declaredUiTable])];

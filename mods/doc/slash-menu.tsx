@@ -1,17 +1,17 @@
-import type { Editor,Range } from '@tiptap/core';
-import type { } from './slash-command';
+import type { Editor, Range } from '@tiptap/core';
+import type {} from './slash-command';
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { useTreeEffects } from '@treenx/react/hooks';
 import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
 import {
-type FormEvent,
-forwardRef,
-type ReactNode,
-useEffect,
-useImperativeHandle,
-useMemo,
-useRef,
-useState,
+  type FormEvent,
+  forwardRef,
+  type ReactNode,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 
 export type SlashMenuItem = {
@@ -52,158 +52,192 @@ export interface SlashMenuHandle {
   onKeyDown(props: { event: KeyboardEvent }): boolean;
 }
 
-export const SlashMenu = forwardRef<SlashMenuHandle, Props>(({ items, command, editor, range, docPath }, ref) => {
-  const { createNode } = useTreeEffects();
+export const SlashMenu = forwardRef<SlashMenuHandle, Props>(
+  ({ items, command, editor, range, docPath }, ref) => {
+    const { createNode } = useTreeEffects();
 
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setSelectedIndex(0), [items]);
-  useEffect(() => { scrollToSelected(menuRef.current, selectedIndex); }, [selectedIndex]);
+    useEffect(() => setSelectedIndex(0), [items]);
+    useEffect(() => {
+      scrollToSelected(menuRef.current, selectedIndex);
+    }, [selectedIndex]);
 
-  useImperativeHandle(ref, () => ({
-    onKeyDown: ({ event }: { event: KeyboardEvent }) => {
-      if (pickerMode) return false;
+    useImperativeHandle(ref, () => ({
+      onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+        if (pickerMode) return false;
 
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        setSelectedIndex((i) => (i + 1) % items.length);
-        return true;
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          setSelectedIndex((i) => (i + 1) % items.length);
+          return true;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          setSelectedIndex((i) => (i - 1 + items.length) % items.length);
+          return true;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          selectItem(selectedIndex);
+          return true;
+        }
+        return false;
+      },
+    }));
+
+    const selectItem = (index: number) => {
+      const item = items[index];
+      if (!item) return;
+
+      if (item.picker) {
+        setPickerMode(item.picker);
+        return;
       }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        setSelectedIndex((i) => (i - 1 + items.length) % items.length);
-        return true;
-      }
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        selectItem(selectedIndex);
-        return true;
-      }
-      return false;
-    },
-  }));
+      command(item);
+    };
 
-  const selectItem = (index: number) => {
-    const item = items[index];
-    if (!item) return;
+    const close = () => {
+      setPickerMode(null);
+      command({ title: '', group: '', command: () => {} });
+    };
 
-    if (item.picker) {
-      setPickerMode(item.picker);
-      return;
-    }
-    command(item);
-  };
-
-  const close = () => {
-    setPickerMode(null);
-    command({ title: '', group: '', command: () => {} });
-  };
-
-  const insertRef = (path: string) => {
-    editor.chain().focus().deleteRange(range).insertContent({
-      type: 'treenixBlock',
-      attrs: { ref: path, type: null, props: {} },
-    }).run();
-    close();
-  };
-
-  const insertLink = (path: string) => {
-    const label = path.split('/').filter(Boolean).pop() ?? path;
-    editor.chain().focus().deleteRange(range)
-      .insertContent({ type: 'text', text: label, marks: [{ type: 'nodeLink', attrs: { path } }] })
-      .run();
-    close();
-  };
-
-  const insertUrlLink = ({ href, text }: { href: string; text: string }) => {
-    const url = normalizeLinkHref(href);
-    const label = text.trim() || url;
-    if (!url) return;
-
-    editor.chain().focus().deleteRange(range)
-      .insertContent({ type: 'text', text: label, marks: [{ type: 'link', attrs: { href: url } }] })
-      .run();
-    close();
-  };
-
-  const createComponent = async (typeName: string) => {
-    const dp = docPath || editor.storage.slashCommand?.docPath || '';
-    if (!dp || !typeName) {
-      console.error('[slash] createComponent: no docPath', { docPath, storage: editor.storage.slashCommand });
+    const insertRef = (path: string) => {
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent({
+          type: 'treenixBlock',
+          attrs: { ref: path, type: null, props: {} },
+        })
+        .run();
       close();
-      return;
+    };
+
+    const insertLink = (path: string) => {
+      const label = path.split('/').filter(Boolean).pop() ?? path;
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent({
+          type: 'text',
+          text: label,
+          marks: [{ type: 'nodeLink', attrs: { path } }],
+        })
+        .run();
+      close();
+    };
+
+    const insertUrlLink = ({ href, text }: { href: string; text: string }) => {
+      const url = normalizeLinkHref(href);
+      const label = text.trim() || url;
+      if (!url) return;
+
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent({
+          type: 'text',
+          text: label,
+          marks: [{ type: 'link', attrs: { href: url } }],
+        })
+        .run();
+      close();
+    };
+
+    const createComponent = async (typeName: string) => {
+      const dp = docPath || editor.storage.slashCommand?.docPath || '';
+      if (!dp || !typeName) {
+        console.error('[slash] createComponent: no docPath', {
+          docPath,
+          storage: editor.storage.slashCommand,
+        });
+        close();
+        return;
+      }
+
+      const short = typeName.includes('.') ? typeName.split('.').pop() : typeName;
+      const childPath = `${dp}/${short}-${Date.now().toString(36)}`;
+
+      try {
+        await createNode(childPath, typeName);
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: 'treenixBlock',
+            attrs: { ref: childPath, type: null, props: {} },
+          })
+          .run();
+      } catch (err) {
+        console.error('[slash] createComponent failed:', err);
+      }
+      close();
+    };
+
+    if (pickerMode === 'ref') {
+      return (
+        <div className="slash-picker">
+          <div className="slash-picker-header">Embed existing node</div>
+          <PickerScroll>
+            <MiniTree onSelect={insertRef} />
+          </PickerScroll>
+        </div>
+      );
     }
 
-    const short = typeName.includes('.') ? typeName.split('.').pop() : typeName;
-    const childPath = `${dp}/${short}-${Date.now().toString(36)}`;
-
-    try {
-      await createNode(childPath, typeName);
-      editor.chain().focus().deleteRange(range).insertContent({
-        type: 'treenixBlock',
-        attrs: { ref: childPath, type: null, props: {} },
-      }).run();
-    } catch (err) {
-      console.error('[slash] createComponent failed:', err);
+    if (pickerMode === 'nodeLink') {
+      return (
+        <div className="slash-picker">
+          <div className="slash-picker-header">Link to node</div>
+          <PickerScroll>
+            <MiniTree onSelect={insertLink} />
+          </PickerScroll>
+        </div>
+      );
     }
-    close();
-  };
 
-  if (pickerMode === 'ref') {
+    if (pickerMode === 'urlLink') {
+      return <LinkPicker onSubmit={insertUrlLink} />;
+    }
+
+    if (pickerMode === 'component') {
+      return <TypePicker onSelect={createComponent} />;
+    }
+
+    if (!items.length) {
+      return (
+        <div className="slash-menu">
+          <div className="slash-menu-empty">No commands</div>
+        </div>
+      );
+    }
+
     return (
-      <div className="slash-picker">
-        <div className="slash-picker-header">Embed existing node</div>
-        <PickerScroll>
-          <MiniTree onSelect={insertRef} />
-        </PickerScroll>
+      <div className="slash-menu" ref={menuRef}>
+        {items.map((item, i) => (
+          <button
+            key={item.title}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectItem(i);
+            }}
+            className={`slash-menu-item${i === selectedIndex ? ' selected' : ''}`}
+          >
+            <span className="slash-menu-title">{item.title}</span>
+            <span className="slash-menu-group">{item.group}</span>
+          </button>
+        ))}
       </div>
     );
-  }
-
-  if (pickerMode === 'nodeLink') {
-    return (
-      <div className="slash-picker">
-        <div className="slash-picker-header">Link to node</div>
-        <PickerScroll>
-          <MiniTree onSelect={insertLink} />
-        </PickerScroll>
-      </div>
-    );
-  }
-
-  if (pickerMode === 'urlLink') {
-    return <LinkPicker onSubmit={insertUrlLink} />;
-  }
-
-  if (pickerMode === 'component') {
-    return <TypePicker onSelect={createComponent} />;
-  }
-
-  if (!items.length) {
-    return (
-      <div className="slash-menu">
-        <div className="slash-menu-empty">No commands</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="slash-menu" ref={menuRef}>
-      {items.map((item, i) => (
-        <button
-          key={item.title}
-          onMouseDown={(e) => { e.preventDefault(); selectItem(i); }}
-          className={`slash-menu-item${i === selectedIndex ? ' selected' : ''}`}
-        >
-          <span className="slash-menu-title">{item.title}</span>
-          <span className="slash-menu-group">{item.group}</span>
-        </button>
-      ))}
-    </div>
-  );
-});
+  },
+);
 
 SlashMenu.displayName = 'SlashMenu';
 
@@ -224,7 +258,9 @@ function LinkPicker({ onSubmit }: { onSubmit: (value: { href: string; text: stri
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -266,7 +302,10 @@ function TypePicker({ onSelect }: { onSelect: (type: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const allTypes = useMemo(() => registry.typesForContext('react').sort(), [registry, declarations]);
+  const allTypes = useMemo(
+    () => registry.typesForContext('react').sort(),
+    [registry, declarations],
+  );
 
   const filtered = useMemo(() => {
     if (!query) return allTypes;
@@ -275,9 +314,13 @@ function TypePicker({ onSelect }: { onSelect: (type: string) => void }) {
   }, [allTypes, query]);
 
   useEffect(() => setSelectedIndex(0), [filtered]);
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
-  useEffect(() => { scrollToSelected(listRef.current, selectedIndex); }, [selectedIndex]);
+  useEffect(() => {
+    scrollToSelected(listRef.current, selectedIndex);
+  }, [selectedIndex]);
 
   const confirm = () => {
     const selected = filtered[selectedIndex];
@@ -313,7 +356,10 @@ function TypePicker({ onSelect }: { onSelect: (type: string) => void }) {
         {filtered.slice(0, 20).map((t, i) => (
           <button
             key={t}
-            onMouseDown={(e) => { e.preventDefault(); onSelect(t); }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(t);
+            }}
             className={`slash-menu-item${i === selectedIndex ? ' selected' : ''}`}
           >
             <span className="slash-menu-title">{t}</span>
@@ -321,7 +367,10 @@ function TypePicker({ onSelect }: { onSelect: (type: string) => void }) {
         ))}
         {filtered.length === 0 && query.trim() && (
           <button
-            onMouseDown={(e) => { e.preventDefault(); onSelect(query.trim()); }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(query.trim());
+            }}
             className="slash-menu-item selected"
           >
             <span className="slash-menu-title">Create &ldquo;{query.trim()}&rdquo;</span>

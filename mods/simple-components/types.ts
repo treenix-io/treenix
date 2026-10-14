@@ -3,8 +3,6 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Universal ECS components — attach to any node via named key
 // Pattern: node.checklist = { $type: 'simple.checklist', items: [...] }
 
-
-
 // ── Checklist ──
 
 export class TChecklist {
@@ -19,14 +17,14 @@ export class TChecklist {
 
   /** @description Toggle checklist item */
   async toggle(data: { /** Item id */ id: number }) {
-    const item = this.items.find(i => i.id === data.id);
+    const item = this.items.find((i) => i.id === data.id);
     if (!item) throw new Error('invalid id');
     item.done = !item.done;
   }
 
   /** @description Remove checklist item */
   remove(data: { /** Item id */ id: number }) {
-    const idx = this.items.findIndex(i => i.id === data.id);
+    const idx = this.items.findIndex((i) => i.id === data.id);
     if (idx < 0) throw new Error('invalid id');
     this.items.splice(idx, 1);
   }
@@ -63,7 +61,10 @@ export class TEstimate {
   unit: 'hours' | 'points' | 'days' = 'hours';
 
   /** @description Set estimate value and unit */
-  update(data: { /** Numeric value */ value: number; /** Unit */ unit?: 'hours' | 'points' | 'days' }) {
+  update(data: {
+    /** Numeric value */ value: number;
+    /** Unit */ unit?: 'hours' | 'points' | 'days';
+  }) {
     if (typeof data.value !== 'number' || data.value < 0) throw new Error('value must be >= 0');
     this.value = data.value;
     if (data.unit) this.unit = data.unit;
@@ -86,7 +87,7 @@ export class TLinks {
 
   /** @description Remove a link by id */
   remove(data: { /** Item id */ id: number }) {
-    const idx = this.items.findIndex(i => i.id === data.id);
+    const idx = this.items.findIndex((i) => i.id === data.id);
     if (idx < 0) throw new Error('invalid id');
     this.items.splice(idx, 1);
   }
@@ -160,21 +161,76 @@ export interface AttachableComponent {
 }
 
 export const ATTACHABLE_COMPONENTS: AttachableComponent[] = [
-  { type: 't.description', key: 'description', label: 'Description', description: 'Free-text description / instructions for this node', icon: '📝', defaults: { text: '' } },
-  { type: 'simple.checklist', key: 'checklist', label: 'Checklist', description: 'Todo items with progress tracking', icon: '☑', defaults: { items: [] } },
-  { type: 'simple.tags', key: 'tags', label: 'Tags', description: 'Colored labels for categorization', icon: '🏷', defaults: { items: [] } },
-  { type: 'simple.estimate', key: 'estimate', label: 'Estimate', description: 'Time or effort estimation', icon: '⏱', defaults: { value: 0, unit: 'hours' } },
-  { type: 'simple.links', key: 'links', label: 'Links', description: 'Related URLs and references', icon: '🔗', defaults: { items: [] } },
-  { type: 'simple.comments', key: 'comments', label: 'Comments', description: 'Discussion thread', icon: '💬', defaults: { items: [] } },
-  { type: 'simple.time-track', key: 'timeTrack', label: 'Time Track', description: 'Start/stop timer with history', icon: '⏲', defaults: { entries: [], running: false } },
+  {
+    type: 't.description',
+    key: 'description',
+    label: 'Description',
+    description: 'Free-text description / instructions for this node',
+    icon: '📝',
+    defaults: { text: '' },
+  },
+  {
+    type: 'simple.checklist',
+    key: 'checklist',
+    label: 'Checklist',
+    description: 'Todo items with progress tracking',
+    icon: '☑',
+    defaults: { items: [] },
+  },
+  {
+    type: 'simple.tags',
+    key: 'tags',
+    label: 'Tags',
+    description: 'Colored labels for categorization',
+    icon: '🏷',
+    defaults: { items: [] },
+  },
+  {
+    type: 'simple.estimate',
+    key: 'estimate',
+    label: 'Estimate',
+    description: 'Time or effort estimation',
+    icon: '⏱',
+    defaults: { value: 0, unit: 'hours' },
+  },
+  {
+    type: 'simple.links',
+    key: 'links',
+    label: 'Links',
+    description: 'Related URLs and references',
+    icon: '🔗',
+    defaults: { items: [] },
+  },
+  {
+    type: 'simple.comments',
+    key: 'comments',
+    label: 'Comments',
+    description: 'Discussion thread',
+    icon: '💬',
+    defaults: { items: [] },
+  },
+  {
+    type: 'simple.time-track',
+    key: 'timeTrack',
+    label: 'Time Track',
+    description: 'Start/stop timer with history',
+    icon: '⏲',
+    defaults: { entries: [], running: false },
+  },
 ];
 
-export const clientModules = [declareOpenModule('@treenx/mods/simple-components/types', [], [
-  declaredSimpleChecklist,
-  declaredSimpleTags,
-  declaredSimpleEstimate,
-  declaredSimpleLinks,
-  declaredSimpleComments,
-  declaredSimpleTimeTrack,
-  declaredTDescription,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/simple-components/types',
+    [],
+    [
+      declaredSimpleChecklist,
+      declaredSimpleTags,
+      declaredSimpleEstimate,
+      declaredSimpleLinks,
+      declaredSimpleComments,
+      declaredSimpleTimeTrack,
+      declaredTDescription,
+    ],
+  ),
+];

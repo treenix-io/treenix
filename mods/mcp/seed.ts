@@ -6,7 +6,12 @@ registerPrefab('mcp', 'seed', [
   { $path: 'sys/mcp', $type: 'mcp.server', url: '/mcp', target: '/sys/mcp/tools' },
   { $path: 'sys/mcp/tools', $type: 'mcp.treenix' },
   { $path: 'sys/autostart/mcp', $type: 'ref', $ref: '/sys/mcp' },
-  { $path: 'auth/api-tokens', $type: 't.api.tokens',
-    $acl: [{ g: 'admins', p: R | W | A }, { g: 'authenticated', p: 0 }],
+  {
+    $path: 'auth/api-tokens',
+    $type: 't.api.tokens',
+    $acl: [
+      { g: 'admins', p: R | W | A },
+      { g: 'authenticated', p: 0 },
+    ],
   },
 ]);

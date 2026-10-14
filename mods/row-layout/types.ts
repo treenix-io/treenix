@@ -1,26 +1,26 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-import { templates } from './lib/templates'
-import type { LayoutRow } from './lib/types'
+import { templates } from './lib/templates';
+import type { LayoutRow } from './lib/types';
 
 export class RowColLayout {
-  gap = 'gap-3'
-  padding = 'p-4'
-  context = 'react'
-  rows: LayoutRow[] = []
-  hidden: string[] = []
+  gap = 'gap-3';
+  padding = 'p-4';
+  context = 'react';
+  rows: LayoutRow[] = [];
+  hidden: string[] = [];
 
   applyTemplate(data: { name: string; refs: string[] }) {
-    const tpl = templates.find(t => t.name === data.name)
-    if (!tpl) throw new Error(`Unknown template: ${data.name}`)
-    this.rows = tpl.apply(data.refs)
-    this.hidden = []
+    const tpl = templates.find((t) => t.name === data.name);
+    if (!tpl) throw new Error(`Unknown template: ${data.name}`);
+    this.rows = tpl.apply(data.refs);
+    this.hidden = [];
   }
 }
 
 const declaredLayoutRowCol = declareClientType('layout.row-col', RowColLayout);
 
-export const clientModules = [declareOpenModule('@treenx/mods/row-layout/types', [], [
-  declaredLayoutRowCol,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/row-layout/types', [], [declaredLayoutRowCol]),
+];

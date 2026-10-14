@@ -1,7 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 /** Board of ideas — container that auto-approves popular ones */
 export class IdeasBoard {
   autoApproveThreshold = 5;
@@ -14,15 +13,20 @@ export class Idea {
   votes = 0;
   status: 'new' | 'approved' | 'rejected' = 'new';
 
-  upvote() { this.votes++; }
+  upvote() {
+    this.votes++;
+  }
 
-  approve() { this.status = 'approved'; }
+  approve() {
+    this.status = 'approved';
+  }
 
-  reject() { this.status = 'rejected'; }
+  reject() {
+    this.status = 'rejected';
+  }
 }
 const declaredIdealIdea = declareClientType('ideal.idea', Idea);
 
-export const clientModules = [declareOpenModule('@treenx/mods/ideal/types', [], [
-  declaredIdealBoard,
-  declaredIdealIdea,
-])];
+export const clientModules = [
+  declareOpenModule('@treenx/mods/ideal/types', [], [declaredIdealBoard, declaredIdealIdea]),
+];

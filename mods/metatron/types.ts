@@ -1,7 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
-
 // Legacy types — kept for schema compatibility, no active code references.
 // TODO: remove once existing data is migrated.
 
@@ -26,7 +25,10 @@ export class MetatronSkill {
 const declaredMetatronTemplate = declareClientType('metatron.template', MetatronTemplate);
 const declaredMetatronSkill = declareClientType('metatron.skill', MetatronSkill);
 
-export const clientModules = [declareOpenModule('@treenx/mods/metatron/types', [], [
-  declaredMetatronTemplate,
-  declaredMetatronSkill,
-])];
+export const clientModules = [
+  declareOpenModule(
+    '@treenx/mods/metatron/types',
+    [],
+    [declaredMetatronTemplate, declaredMetatronSkill],
+  ),
+];

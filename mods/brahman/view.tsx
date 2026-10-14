@@ -6,11 +6,29 @@ import dayjs from 'dayjs';
 
 import './types';
 import {
-  BackAction, BotConfig, BrahmanMessage, BroadcastAction, EmitTextAction, EvalAction,
-  FileAction, ForwardAction, GetValueAction, IfElseAction, KeywordSelectAction,
-  MessageAction, OnErrorAction, PageConfig, PageNavAction, ParamsAction,
-  QuestionAction, RemoveAction, ResetHistoryAction, ResetSessionAction,
-  SelectLanguageAction, SetValueAction, TagAction,
+  BackAction,
+  BotConfig,
+  BrahmanMessage,
+  BroadcastAction,
+  EmitTextAction,
+  EvalAction,
+  FileAction,
+  ForwardAction,
+  GetValueAction,
+  IfElseAction,
+  KeywordSelectAction,
+  MessageAction,
+  OnErrorAction,
+  PageConfig,
+  PageNavAction,
+  ParamsAction,
+  QuestionAction,
+  RemoveAction,
+  ResetHistoryAction,
+  ResetSessionAction,
+  SelectLanguageAction,
+  SetValueAction,
+  TagAction,
 } from './types';
 
 import {
@@ -43,41 +61,29 @@ import { PageLayoutView } from './views/page-layout';
 
 // ── Node-level views (react context) ──
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ── Compact list items (react:list context) ──
 
 const listTypes = [
-  MessageAction, QuestionAction, IfElseAction,
-  PageNavAction, BackAction, TagAction,
-  BroadcastAction, GetValueAction, SetValueAction,
-  ParamsAction, FileAction, EvalAction,
-  RemoveAction, EmitTextAction, ForwardAction,
-  ResetSessionAction, ResetHistoryAction, OnErrorAction,
-  KeywordSelectAction, SelectLanguageAction,
+  MessageAction,
+  QuestionAction,
+  IfElseAction,
+  PageNavAction,
+  BackAction,
+  TagAction,
+  BroadcastAction,
+  GetValueAction,
+  SetValueAction,
+  ParamsAction,
+  FileAction,
+  EvalAction,
+  RemoveAction,
+  EmitTextAction,
+  ForwardAction,
+  ResetSessionAction,
+  ResetHistoryAction,
+  OnErrorAction,
+  KeywordSelectAction,
+  SelectLanguageAction,
 ];
 
 const MessageRow: View<BrahmanMessage> = ({ value }) => (
@@ -119,6 +125,6 @@ export const clientModules = [
     declareView(OnErrorAction, 'react', OnErrorEditor),
     declareView(KeywordSelectAction, 'react', KeywordSelectEditor),
     declareView(SelectLanguageAction, 'react', SelectLanguageEditor),
-    ...listTypes.map(type => declareView(type, 'react:list', ActionListItem))
-  ])
+    ...listTypes.map((type) => declareView(type, 'react:list', ActionListItem)),
+  ]),
 ];

@@ -8,27 +8,42 @@ import { nativeSimpleComponentsManifest } from './native';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-
 const manifest = nativeSimpleComponentsManifest();
 function declaredAction(type: string, action: string) {
-  const owner = manifest.types.find(owner => owner.name === type);
+  const owner = manifest.types.find((owner) => owner.name === type);
   assert.ok(owner, `Native type is absent: ${type}`);
   return owner.actions[action];
 }
 
 /** Execute the authored action through a real native session, then read accepted state. */
-async function execute<T extends object>(type: string, action: string, component: T, args: unknown = {}) {
-  const test = await createTestInstance({ modules: [manifest],
-    seed: [{ $path: '/component', $type: type, ...component }], actors: {} });
+async function execute<T extends object>(
+  type: string,
+  action: string,
+  component: T,
+  args: unknown = {},
+) {
+  const test = await createTestInstance({
+    modules: [manifest],
+    seed: [{ $path: '/component', $type: type, ...component }],
+    actors: {},
+  });
   const session = await test.instance.openSession(test.instance.setupCredential);
   const delivery = drainSession(session);
   try {
-    await session.act({ path: '/component', action, args,
-      opId: { epoch: test.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() } }).outcome;
+    await session.act({
+      path: '/component',
+      action,
+      args,
+      opId: { epoch: test.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() },
+    }).outcome;
     const copy = (await session.read({ node: '/component' })).copies[0];
     if ('error' in copy) throw copy.error;
     Object.assign(component, copy.node);
-  } finally { session.close(); await delivery; await test.close(); }
+  } finally {
+    session.close();
+    await delivery;
+    await test.close();
+  }
 }
 
 // ── simple.checklist ──
@@ -56,7 +71,12 @@ describe('simple.checklist', () => {
   });
 
   it('remove deletes item by id', async () => {
-    const comp = { items: [{ id: 1, text: 'A', done: false }, { id: 2, text: 'B', done: false }] };
+    const comp = {
+      items: [
+        { id: 1, text: 'A', done: false },
+        { id: 2, text: 'B', done: false },
+      ],
+    };
     await execute('simple.checklist', 'remove', comp, { id: 1 });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].text, 'B');
@@ -64,14 +84,18 @@ describe('simple.checklist', () => {
 
   it('add throws on empty text', async () => {
     await assert.rejects(
-      async () => { await execute('simple.checklist', 'add', { items: [] }, { text: '' }); },
+      async () => {
+        await execute('simple.checklist', 'add', { items: [] }, { text: '' });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'INVALID',
     );
   });
 
   it('toggle throws on invalid id', async () => {
     await assert.rejects(
-      async () => { await execute('simple.checklist', 'toggle', { items: [] }, { id: 999 }); },
+      async () => {
+        await execute('simple.checklist', 'toggle', { items: [] }, { id: 999 });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'NOT_FOUND',
     );
   });
@@ -105,7 +129,9 @@ describe('simple.tags', () => {
 
   it('add throws on empty tag', async () => {
     await assert.rejects(
-      async () => { await execute('simple.tags', 'add', { items: [] }, { tag: '  ' }); },
+      async () => {
+        await execute('simple.tags', 'add', { items: [] }, { tag: '  ' });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'INVALID',
     );
   });
@@ -134,7 +160,9 @@ describe('simple.estimate', () => {
 
   it('update throws on negative value', async () => {
     await assert.rejects(
-      async () => { await execute('simple.estimate', 'update', { value: 0, unit: 'hours' }, { value: -1 }); },
+      async () => {
+        await execute('simple.estimate', 'update', { value: 0, unit: 'hours' }, { value: -1 });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'INVALID',
     );
   });
@@ -164,7 +192,12 @@ describe('simple.links', () => {
   });
 
   it('remove deletes by id', async () => {
-    const comp = { items: [{ id: 1, url: 'a', label: '' }, { id: 2, url: 'b', label: '' }] };
+    const comp = {
+      items: [
+        { id: 1, url: 'a', label: '' },
+        { id: 2, url: 'b', label: '' },
+      ],
+    };
     await execute('simple.links', 'remove', comp, { id: 1 });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].url, 'b');
@@ -172,7 +205,9 @@ describe('simple.links', () => {
 
   it('add throws on empty url', async () => {
     await assert.rejects(
-      async () => { await execute('simple.links', 'add', { items: [] }, { url: '' }); },
+      async () => {
+        await execute('simple.links', 'add', { items: [] }, { url: '' });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'INVALID',
     );
   });
@@ -203,7 +238,9 @@ describe('simple.comments', () => {
 
   it('add throws on empty text', async () => {
     await assert.rejects(
-      async () => { await execute('simple.comments', 'add', { items: [] }, { text: '' }); },
+      async () => {
+        await execute('simple.comments', 'add', { items: [] }, { text: '' });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'INVALID',
     );
   });
@@ -237,14 +274,18 @@ describe('simple.time-track', () => {
 
   it('start throws if already running', async () => {
     await assert.rejects(
-      async () => { await execute('simple.time-track', 'start', { entries: [], running: true }); },
+      async () => {
+        await execute('simple.time-track', 'start', { entries: [], running: true });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'CONFLICT',
     );
   });
 
   it('stop throws if not running', async () => {
     await assert.rejects(
-      async () => { await execute('simple.time-track', 'stop', { entries: [], running: false }); },
+      async () => {
+        await execute('simple.time-track', 'stop', { entries: [], running: false });
+      },
       (err: Error) => err instanceof KernelError && err.code === 'CONFLICT',
     );
   });

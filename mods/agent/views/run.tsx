@@ -18,15 +18,18 @@ function StopButton({ runPath }: { runPath: string }) {
 
   const [stopping, setStopping] = useState(false);
 
-  const handleStop = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setStopping(true);
-    try {
-      await execute(runPath, 'stop', {});
-    } finally {
-      setStopping(false);
-    }
-  }, [runPath, execute]);
+  const handleStop = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setStopping(true);
+      try {
+        await execute(runPath, 'stop', {});
+      } finally {
+        setStopping(false);
+      }
+    },
+    [runPath, execute],
+  );
 
   return (
     <button
@@ -70,22 +73,37 @@ function useElapsed(startTs: number, active: boolean): string {
 
 // ── Structured log renderer (from LogEntry[]) ──
 
-function StructuredLogRenderer({ entries, className }: { entries: LogEntry[]; className?: string }) {
+function StructuredLogRenderer({
+  entries,
+  className,
+}: {
+  entries: LogEntry[];
+  className?: string;
+}) {
   // Convert structured entries back to text format for the existing LogRenderer
   // TODO: build native structured renderer that avoids double conversion
   const text = useMemo(() => {
     if (!entries?.length) return '';
-    return entries.map(e => {
-      switch (e.type) {
-        case 'text': return e.output ?? '';
-        case 'tool_call': return `\n[tool] ${e.tool}\n${JSON.stringify(e.input, null, 2)}\n`;
-        case 'tool_result': return `\n[result] ${e.output}\n`;
-        case 'thinking': return `\n[thinking]\n${e.output}\n`;
-        case 'approval': return `\n[approval] ${e.tool} → ${e.approved ? 'approved' : 'denied'}\n`;
-        case 'embed': return e.ref ? `\n[embed] ${e.ref}\n` : '';
-        default: return '';
-      }
-    }).join('');
+    return entries
+      .map((e) => {
+        switch (e.type) {
+          case 'text':
+            return e.output ?? '';
+          case 'tool_call':
+            return `\n[tool] ${e.tool}\n${JSON.stringify(e.input, null, 2)}\n`;
+          case 'tool_result':
+            return `\n[result] ${e.output}\n`;
+          case 'thinking':
+            return `\n[thinking]\n${e.output}\n`;
+          case 'approval':
+            return `\n[approval] ${e.tool} → ${e.approved ? 'approved' : 'denied'}\n`;
+          case 'embed':
+            return e.ref ? `\n[embed] ${e.ref}\n` : '';
+          default:
+            return '';
+        }
+      })
+      .join('');
   }, [entries]);
 
   return <LogRenderer text={text} className={className} />;
@@ -109,23 +127,26 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
 
   return (
     <div className="flex flex-col gap-5 p-5 max-w-4xl">
-
       {/* Header */}
       <div className="flex items-center gap-3">
         {isRunning ? <RunningPing /> : <StatusDot status={status} />}
         <StatusBadge status={status} />
-        <span className={cn(
-          'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card text-muted-foreground',
-        )}>
+        <span
+          className={cn(
+            'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card text-muted-foreground',
+          )}
+        >
           {value.mode}
         </span>
 
         <div className="flex items-center gap-2 ml-auto">
           {elapsed && (
-            <span className={cn(
-              'text-[10px] font-mono tabular-nums',
-              isRunning ? 'text-sky-400/70' : 'text-muted-foreground',
-            )}>
+            <span
+              className={cn(
+                'text-[10px] font-mono tabular-nums',
+                isRunning ? 'text-sky-400/70' : 'text-muted-foreground',
+              )}
+            >
               {elapsed}
             </span>
           )}
@@ -143,9 +164,7 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
 
       {/* Task ref */}
       {value.taskRef && (
-        <div className="text-[11px] text-muted-foreground font-mono">
-          task: {value.taskRef}
-        </div>
+        <div className="text-[11px] text-muted-foreground font-mono">task: {value.taskRef}</div>
       )}
 
       {/* Branch ref — the run's workspace. Paths the agent mentions in its log
@@ -153,8 +172,12 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
       {value.branchRef && (
         <div className="text-[11px] font-mono flex items-center gap-3">
           <span className="text-muted-foreground">branch:</span>
-          <a className="text-blue-400 hover:underline" href={`/t${value.branchRef}`}>{value.branchRef}</a>
-          <a className="text-muted-foreground hover:underline" href={`/t${value.branchRef}/tree`}>browse as agent</a>
+          <a className="text-blue-400 hover:underline" href={`/t${value.branchRef}`}>
+            {value.branchRef}
+          </a>
+          <a className="text-muted-foreground hover:underline" href={`/t${value.branchRef}/tree`}>
+            browse as agent
+          </a>
         </div>
       )}
 
@@ -172,7 +195,7 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
 
       {/* Tabs */}
       <div className="flex gap-0.5 bg-card/40 rounded-lg p-0.5 w-fit">
-        {(['log', 'result'] as const).map(t => (
+        {(['log', 'result'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -189,16 +212,21 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
       </div>
 
       {/* Content */}
-      <div className={cn(
-        'rounded-xl px-3 py-2.5 max-h-[75vh] overflow-y-auto border transition-all duration-300',
-        isRunning
-          ? 'bg-card border-sky-500/15 shadow-lg shadow-sky-500/5'
-          : 'bg-card border-border',
-      )}>
-        {tab === 'log'
-          ? <StructuredLogRenderer entries={entries} />
-          : <p className="text-sm text-foreground whitespace-pre-wrap">{value.result || 'No result yet'}</p>
-        }
+      <div
+        className={cn(
+          'rounded-xl px-3 py-2.5 max-h-[75vh] overflow-y-auto border transition-all duration-300',
+          isRunning
+            ? 'bg-card border-sky-500/15 shadow-lg shadow-sky-500/5'
+            : 'bg-card border-border',
+        )}
+      >
+        {tab === 'log' ? (
+          <StructuredLogRenderer entries={entries} />
+        ) : (
+          <p className="text-sm text-foreground whitespace-pre-wrap">
+            {value.result || 'No result yet'}
+          </p>
+        )}
       </div>
 
       {/* Error */}
@@ -222,19 +250,25 @@ const RunRow: View<AiRun> = ({ value, ctx }) => {
   return (
     <>
       <StatusDot status={status} />
-      <span className={cn(
-        'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card/60 text-muted-foreground',
-      )}>
+      <span
+        className={cn(
+          'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card/60 text-muted-foreground',
+        )}
+      >
         {value.mode}
       </span>
       <span className="text-sm text-foreground truncate flex-1">
         {value.prompt.slice(0, 80) || '(no prompt)'}
       </span>
       {costComp && costComp.costUsd > 0 && (
-        <span className="text-[10px] font-mono text-muted-foreground">${costComp.costUsd.toFixed(3)}</span>
+        <span className="text-[10px] font-mono text-muted-foreground">
+          ${costComp.costUsd.toFixed(3)}
+        </span>
       )}
       {runStatus?.startedAt ? (
-        <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(runStatus.startedAt)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {formatTime(runStatus.startedAt)}
+        </span>
       ) : null}
     </>
   );
@@ -243,6 +277,6 @@ const RunRow: View<AiRun> = ({ value, ctx }) => {
 export const clientModules = [
   declareClientModule('@treenx/mods/agent/views/run', [
     declareView(AiRun, 'react', RunView),
-    declareView(AiRun, 'react:list', RunRow)
-  ])
+    declareView(AiRun, 'react:list', RunRow),
+  ]),
 ];

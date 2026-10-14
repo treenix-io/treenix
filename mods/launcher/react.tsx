@@ -1,21 +1,21 @@
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
-import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Launcher view — dashboard with drag-drop from tree + context switching
 
 import { isRef } from '@treenx/core';
-import { Render,RenderContext,type View,useActions } from '@treenx/react';
-import { useChildren,useNavigate,usePath } from '@treenx/react';
+import { Render, RenderContext, type View, useActions } from '@treenx/react';
+import { useChildren, useNavigate, usePath } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import {
-DropdownMenu,
-DropdownMenuContent,
-DropdownMenuItem,
-DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from '@treenx/react/ui/dropdown-menu';
-import { GripVertical,Plus,X } from 'lucide-react';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { GripVertical, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { Launcher } from './types';
@@ -58,7 +58,10 @@ function EditOverlay({
         variant="ghost"
         size="sm"
         className="launcher-btn absolute -right-1 -top-1 z-10 h-5 w-5 rounded-full bg-red-700 p-0 hover:bg-red-600"
-        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <X className="h-3 w-3 text-white" />
@@ -128,14 +131,19 @@ function AppItem({
 
   const label = target.$path.split('/').at(-1) || '?';
   const renderContext = context === 'react:icon' ? launcherIconContext : context;
-  const hasView = context === 'react:icon'
-    ? registry.resolve(target.$type, renderContext, false) !== null
-    : registry.exact(target.$type, renderContext) !== null;
+  const hasView =
+    context === 'react:icon'
+      ? registry.resolve(target.$type, renderContext, false) !== null
+      : registry.exact(target.$type, renderContext) !== null;
 
   // No view registered for this context — offer AI generation
-  const renderContent = hasView
-    ? <RenderContext name={renderContext}><Render value={target} /></RenderContext>
-    : <span className="text-xs text-muted-foreground italic">No view for {target.$type}</span>;
+  const renderContent = hasView ? (
+    <RenderContext name={renderContext}>
+      <Render value={target} />
+    </RenderContext>
+  ) : (
+    <span className="text-xs text-muted-foreground italic">No view for {target.$type}</span>
+  );
 
   // Icon-style: centered icon + label
   if (context === 'react:icon') {
@@ -147,9 +155,7 @@ function AppItem({
         {editing && onRemove && onContextChange && (
           <EditOverlay ctx={stored} onRemove={onRemove} onContextChange={onContextChange} />
         )}
-        <div className="h-14 w-14 shrink-0">
-          {renderContent}
-        </div>
+        <div className="h-14 w-14 shrink-0">{renderContent}</div>
         <span className="max-w-16 truncate text-center text-[11px] font-medium text-white/90 drop-shadow-sm">
           {label}
         </span>
@@ -169,9 +175,7 @@ function AppItem({
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-white/50">
         {label}
       </div>
-      <div className="h-[calc(100%-1.5rem)] overflow-hidden text-white">
-        {renderContent}
-      </div>
+      <div className="h-[calc(100%-1.5rem)] overflow-hidden text-white">{renderContent}</div>
     </div>
   );
 }
@@ -257,7 +261,11 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
       // Preserve ctx from current layoutItems
       const ctxMap = new Map(layoutItems.map((l) => [l.i, l.ctx]));
       const clean = newLayout.map(({ i, x, y, w, h }) => ({
-        i, x, y, w, h,
+        i,
+        x,
+        y,
+        w,
+        h,
         ...(ctxMap.get(i) ? { ctx: ctxMap.get(i) } : {}),
       }));
       actions.updateLayout({ layout: JSON.stringify(clean) });
@@ -281,8 +289,9 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
   const handleExternalDrop = useCallback(
     (_layout: unknown, _item: unknown, e: Event) => {
       const de = e as DragEvent;
-      const path = de.dataTransfer?.getData('application/treenix-path')
-        || de.dataTransfer?.getData('text/plain');
+      const path =
+        de.dataTransfer?.getData('application/treenix-path') ||
+        de.dataTransfer?.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
       actions.addApp({ path });
       setDragOver(false);
@@ -302,8 +311,8 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const path = e.dataTransfer.getData('application/treenix-path')
-        || e.dataTransfer.getData('text/plain');
+      const path =
+        e.dataTransfer.getData('application/treenix-path') || e.dataTransfer.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
       actions.addApp({ path });
     },
@@ -411,6 +420,6 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
 
 export const clientModules = [
   declareClientModule('@treenx/mods/launcher/react', [
-    declareView('launcher', 'react', LauncherView)
-  ])
+    declareView('launcher', 'react', LauncherView),
+  ]),
 ];

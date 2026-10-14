@@ -3,13 +3,20 @@ import { mdToTiptap } from './markdown';
 
 // FS mount-point for a docs directory
 // Setup accepts { root: string } to set the filesystem path
-registerPrefab('doc', 'library', [
-  { $path: '.', $type: 'mount-point', '#mount': { $type: 't.mount.fs', root: '' } },
-], (nodes, params) => {
-  const p = params as { root?: string } | undefined;
-  if (!p?.root) return nodes;
-  return nodes.map(n => n.$path === '.' ? { ...n, '#mount': { ...(n['#mount'] as Record<string, unknown>), root: p.root } } : n);
-});
+registerPrefab(
+  'doc',
+  'library',
+  [{ $path: '.', $type: 'mount-point', '#mount': { $type: 't.mount.fs', root: '' } }],
+  (nodes, params) => {
+    const p = params as { root?: string } | undefined;
+    if (!p?.root) return nodes;
+    return nodes.map((n) =>
+      n.$path === '.'
+        ? { ...n, '#mount': { ...(n['#mount'] as Record<string, unknown>), root: p.root } }
+        : n,
+    );
+  },
+);
 
 // Sample doc.page node
 const welcomeMd = `A rich document with **bold**, *italic*, and \`code\`.

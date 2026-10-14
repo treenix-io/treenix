@@ -3,7 +3,13 @@
 // Sessions persist via `resume` option. If resume fails, auto-retries fresh.
 // Active query registry: keyed by configPath, enables abort from stop action.
 
-import { abortQuery, isQueryRunning, type LogEntry, registerQuery, unregisterQuery } from '#agent/types';
+import {
+  abortQuery,
+  isQueryRunning,
+  type LogEntry,
+  registerQuery,
+  unregisterQuery,
+} from '#agent/types';
 import { type CanUseTool, query } from '@anthropic-ai/claude-agent-sdk';
 import { evaluatePermission, type PermissionRule } from './permissions';
 
@@ -15,8 +21,8 @@ function ts(): string {
 }
 
 export type ClaudeResult = {
-  output: string;   // full log: text + tool calls + thinking + results
-  text: string;     // clean text only (assistant text blocks)
+  output: string; // full log: text + tool calls + thinking + results
+  text: string; // clean text only (assistant text blocks)
   logEntries: LogEntry[];
   sessionId?: string;
   durationMs: number;
@@ -37,10 +43,12 @@ const log = (msg: string) => console.log(`[metatron:claude] ${msg}`);
 function extractToolResultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((b: any) => {
-      if (b.type === 'text' && typeof b.text === 'string') return b.text;
-      return JSON.stringify(b);
-    }).join('\n');
+    return content
+      .map((b: any) => {
+        if (b.type === 'text' && typeof b.text === 'string') return b.text;
+        return JSON.stringify(b);
+      })
+      .join('\n');
   }
   return String(content);
 }
@@ -95,7 +103,10 @@ async function runQuery(
   },
 ): Promise<ClaudeResult> {
   const mcpUrl = opts.mcpUrl || process.env.TREENIX_MCP_URL || 'http://localhost:3212/mcp';
-  const mcpToken = opts.mcpToken || process.env.TREENIX_MCP_TOKEN || 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+  const mcpToken =
+    opts.mcpToken ||
+    process.env.TREENIX_MCP_TOKEN ||
+    'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
   const startTime = Date.now();
 
   let sessionId: string | undefined;
@@ -109,7 +120,10 @@ async function runQuery(
   const outputChunks: string[] = [];
   const textChunks: string[] = [];
   const logEntries: LogEntry[] = [];
-  const pendingTools = new Map<string, { name: string; ts: number; input: Record<string, unknown> }>();
+  const pendingTools = new Map<
+    string,
+    { name: string; ts: number; input: Record<string, unknown> }
+  >();
 
   const stream = query({
     prompt,
