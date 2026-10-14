@@ -9,7 +9,7 @@ import { createFsStore } from '#kernel/store/fs'
 import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
 import { createFsOverlayLayout } from '#kernel/store/fs-overlay'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
-import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
+import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ExternalEdits, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
   /** Deployment installation completes before mounts and background services start. */
@@ -20,6 +20,7 @@ export interface NativeRuntimeConfig {
   readonly id: string
   readonly directory: string
   readonly baseDirectory?: string
+  readonly rootExternal?: ExternalEdits
   readonly credentialTtlMs: number
   readonly firstAdmin?: AdminInput
   readonly installerCredential?: Credential
@@ -44,6 +45,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     io: input.io,
     directory: input.directory,
     baseDirectory: input.baseDirectory,
+    rootExternal: input.rootExternal,
     credentialTtlMs: input.credentialTtlMs,
     installerCredential:
       input.installerCredential === undefined
@@ -65,7 +67,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
   });
   let store: Awaited<ReturnType<typeof createFsStore>>;
   try {
-    store = await createFsStore({ directory: config.directory, lease, layout });
+    store = await createFsStore({ directory: config.directory, lease, external: config.rootExternal, layout });
   } catch (error) {
     await lease.close();
     throw error;
@@ -97,6 +99,8 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
         deadline: Date.now() + DEFAULT_LIMITS.queryMs,
       },
     });
+    if (store.storageFault?.('/') !== undefined)
+      throw new KernelError('INVALID', 'An unreadable root cannot be bootstrapped');
 
     mounts = await provisionFsMounts(store, config.id, config.mountDirectories, config.rawfsCodecs);
     // A retained tail cannot prove that every earlier accepted decision still exists.
@@ -107,6 +111,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       federation: config.federation,
       shardPath: config.shardPath,
       root: { kind: 'store', store },
+      rootExternal: config.rootExternal,
       mountDirectories: config.mountDirectories,
       rawfsCodecs: config.rawfsCodecs,
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),

@@ -5,7 +5,7 @@ import { A, DEFAULT_LIMITS, R, W, type ModuleManifest, type TypeDef } from '#ker
 export const fsMountType: TypeDef = {
   name: 't.mount.fs', module: 'kernel', security: 'privileged-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern', 'directory'], additionalProperties: false,
-    properties: { pattern: { type: 'string' }, directory: { type: 'string', minLength: 1 }, external: { enum: ['none'] } } },
+    properties: { pattern: { type: 'string' }, directory: { type: 'string', minLength: 1 }, external: { enum: ['none', 'trusted'] } } },
 }
 
 export const optionalKernelTypes: readonly TypeDef[] = [{

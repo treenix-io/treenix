@@ -199,6 +199,9 @@ describe('filesystem logical namespace', { timeout: 45_000 }, () => {
         kind: 'commit', caller: 'kernel', executor: 'kernel',
         entries: [{ id: before.$id, path: before.$path, change: { t: 'delete', before: compacted } }] } })
     const discovered: StoredNode = { ...before, $id: 'p:/mounted/new', $path: '/mounted/new', $pos: position(5) }
+    await mkdir(join(directory, 'new'))
+    const { $path, $pos, $id, ...physical } = discovered
+    await writeFile(join(directory, 'new/$'), JSON.stringify(physical))
     await opened.store.commit({ pos: discovered.$pos, writerEpoch: opened.lease.writerEpoch,
       writes: [{ path: discovered.$path, node: discovered }], record: { pos: discovered.$pos,
         kind: 'reconcile', caller: 'external:fs', executor: 'external:fs',
