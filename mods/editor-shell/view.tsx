@@ -1,26 +1,26 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule } from '@treenx/react/context/client-registry';
 // Editor shell view — registered for t.editor.shell. Rendered by Router when
 // /sys/routes/t resolves. The route node's `route` component (prefix/index)
 // drives target path resolution; ?root= selects the sidebar root and is
 // preserved across navigations via useRouteShell's preserveQuery.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback,useEffect,useMemo,useState } from 'react';
 import { toast } from 'sonner';
 import { compKey } from '@treenx/core';
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { KernelError } from '@treenx/core/errors';
 import {
-  useTreeEffects,
-  NavigateProvider,
-  setEditorRoot,
-  useLocation,
-  type View,
-  view,
+useTreeEffects,
+NavigateProvider,
+setEditorRoot,
+useLocation,
+type View,
+view,
 } from '@treenx/react';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@treenx/react/ui/resizable';
+import { ResizableHandle,ResizablePanel,ResizablePanelGroup } from '@treenx/react/ui/resizable';
 import { useAuthContext } from '@treenx/react/app/auth-context';
-import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
+import { EMPTY,RouteParamsContext } from '@treenx/react/context/route-params';
 import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
 import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
 import { Inspector } from '@treenx/react/editor/Inspector';

@@ -1,9 +1,9 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
-import { Render, useActions, useChildren, type View } from '@treenx/react';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
+import { Render,useActions,useChildren,type View } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
-import React, { useState } from 'react';
-import { TodoItem, TodoList } from './types';
+import { useState } from 'react';
+import { TodoItem,TodoList } from './types';
 
 const TodoListView: View<TodoList> = ({ value, ctx }) => {
   const actions = useActions(value);

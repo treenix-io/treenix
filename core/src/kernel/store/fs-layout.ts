@@ -169,13 +169,6 @@ export async function scanFsNodes(root: string, pos: Position, range: ScanRange,
   }
 }
 
-/** Import accepted startup files before a journal exists. */
-export async function readFsNodes(root: string, pos: Position): Promise<StoredNode[]> {
-  const result = await scanFsNodes(root, pos, { subtree: '/' }, { nodes: Number.MAX_SAFE_INTEGER, bytes: Number.MAX_SAFE_INTEGER,
-    exprWork: Number.MAX_SAFE_INTEGER, deadline: Date.now() + 10_000 })
-  return result.nodes
-}
-
 async function removeFile(root: string, file: string): Promise<void> {
   await assertPathSafe(root, file)
   try {

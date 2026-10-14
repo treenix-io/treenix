@@ -4,11 +4,11 @@ import { isInsideRoot } from '#core/path';
 import { safeJsonParse } from '#util/json';
 import { createLogger } from '#log';
 import { KernelError } from '#errors';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { readdir,readFile,realpath,stat } from 'node:fs/promises';
+import { dirname,join,resolve } from 'node:path';
 import type { LoadedMod } from './types';
-import type { CollectedModule, NativeModuleExports, NativeModuleHost } from '#kernel/manifest';
-import type { ActionIoBinding, Gate, Io, Registry } from '#kernel/types';
+import type { CollectedModule,NativeModuleExports,NativeModuleHost } from '#kernel/manifest';
+import type { ActionIoBinding,Gate,Io,Registry } from '#kernel/types';
 
 const log = createLogger('mod');
 
@@ -149,7 +149,7 @@ async function ensureTsxRegistered(): Promise<void> {
 
 
 /** Loads target entries and collects manifests when running in the native kernel. */
-export async function loadLocalMods(modsDir: string, target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
+export async function loadLocalMods(modsDir: string, _target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [], manifests: [] };
   let entries: import('node:fs').Dirent[];
 

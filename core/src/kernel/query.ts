@@ -8,7 +8,7 @@ import { isRecord } from '#util/is-record'
 export interface QueryConfig { readonly source: Path; readonly match: Where }
 
 /** Decode the stored query declaration once at its configuration boundary. */
-export function queryConfigOf(component: Record<string, unknown>, _at?: Path): QueryConfig {
+function queryConfigOf(component: Record<string, unknown>, _at?: Path): QueryConfig {
   const { source, match } = component
   if (typeof source !== 'string' || !isRecord(match)) throw new KernelError('INVALID', 'Invalid query declaration')
   assertSafePath(source)

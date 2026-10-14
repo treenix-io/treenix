@@ -1,21 +1,21 @@
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Launcher view — dashboard with drag-drop from tree + context switching
 
-import { isRef, type NodeData } from '@treenx/core';
-import { Render, RenderContext, type View, useActions } from '@treenx/react';
-import { useChildren, useNavigate, usePath } from '@treenx/react';
+import { isRef } from '@treenx/core';
+import { Render,RenderContext,type View,useActions } from '@treenx/react';
+import { useChildren,useNavigate,usePath } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+DropdownMenu,
+DropdownMenuContent,
+DropdownMenuItem,
+DropdownMenuTrigger,
 } from '@treenx/react/ui/dropdown-menu';
-import { GripVertical, Plus, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { GripVertical,Plus,X } from 'lucide-react';
+import { useCallback,useEffect,useRef,useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { Launcher } from './types';

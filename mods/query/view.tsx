@@ -1,15 +1,14 @@
 import { clientModules as declaredOwner0 } from './types';
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import type { NodeData } from '@treenx/core';
 import { type View } from '@treenx/react';
-import { useChildren, useNavigate } from '@treenx/react/hooks';
+import { useChildren,useNavigate } from '@treenx/react/hooks';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
-import { List, Plus, Rows3, Table2, X } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
-import { useChildTypes, useFiltered } from './hooks';
-import { type QueryFilter, QueryView } from './types';
+import { Table,TableBody,TableCell,TableHead,TableHeader,TableRow } from '@treenx/react/ui/table';
+import { List,Plus,Rows3,Table2,X } from 'lucide-react';
+import { useMemo,useState,type ReactNode } from 'react';
+import { useChildTypes,useFiltered } from './hooks';
+import { type QueryFilter,QueryView } from './types';
 
 type Mode = QueryView['mode'];
 

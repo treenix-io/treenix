@@ -1,20 +1,20 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
-import { type ComponentData, getComponent } from '@treenx/core';
+import { getComponent } from '@treenx/core';
 import {
-  cn,
-  useActions,
-  minimd,
-  Render,
-  RenderContext,
-  useChildren,
-  usePath,
-  type View,
+cn,
+useActions,
+minimd,
+Render,
+RenderContext,
+useChildren,
+usePath,
+type View,
 } from '@treenx/react';
-import { RenderChildren, RenderItem } from '@treenx/react/mods/editor-ui/list-items';
-import { useMemo, useState } from 'react';
-import { type AgentStatus, AiAgent, AiApproval, AiApprovals, AiPlan, AiPool, AiThread } from './types';
+import { RenderChildren,RenderItem } from '@treenx/react/mods/editor-ui/list-items';
+import { useMemo,useState } from 'react';
+import { type AgentStatus,AiAgent,AiApproval,AiApprovals,AiPlan,AiPool,AiThread } from './types';
 
 // Side-effect imports — register views for sub-components
 import { clientModules as declaredClient0 } from './views/run';
@@ -287,7 +287,7 @@ function ActionBtn({ label, color, onClick }: { label: string; color: string; on
 
 // ── ApprovalsView (ai.approvals — container) ──
 
-const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
+const ApprovalsView: View<AiApprovals> = ({ ctx }) => {
   const { data: children } = useChildren(ctx!.node.$path, { watch: true, watchNew: true });
   const pending = children.filter(n => n.$type === 'ai.approval' && n.status === 'pending');
   const resolved = children.filter(n => n.$type === 'ai.approval' && n.status !== 'pending');
@@ -323,10 +323,10 @@ const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
 
 // ── ApprovalView (ai.approval) ──
 
-const ApprovalView: View<AiApproval> = ({ value, ctx }) => {
+const ApprovalView: View<AiApproval> = ({ value }) => {
   const actions = useActions(value);
 
-  const path = ctx!.node.$path;
+  
   const status = value.status || 'pending';
   const s = APPROVAL_STATUS[status] ?? APPROVAL_STATUS.pending;
   const isPending = status === 'pending';
@@ -503,7 +503,7 @@ const ApprovalRow: View<AiApproval> = ({ value }) => {
 
 // ── AgentLayout (react:layout — agent detail + chat panel) ──
 
-const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
+const AgentLayout: View<AiAgent> = ({ ctx }) => {
   const node = ctx!.node;
   const [collapsed, setCollapsed] = useState(true);
   const chat = getComponent(node, 'ai.chat');

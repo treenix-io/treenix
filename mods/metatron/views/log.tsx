@@ -1,7 +1,6 @@
-import { useNavigate } from '@treenx/react';
 import { minimd } from '@treenx/react';
 import { cn } from '@treenx/react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
 
 // ── Structured log parser ──
 
@@ -59,33 +58,10 @@ function parseLog(raw: unknown): LogBlock[] {
   return blocks;
 }
 
-// ── Linkified text (clickable /paths) ──
 
-const PATH_RE = /(?:^|\s)(\/[\w./-]+)/g;
 
-function Linkified({ text }: { text: string }) {
-  const navigate = useNavigate();
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
 
-  for (const match of text.matchAll(PATH_RE)) {
-    const path = match[1];
-    const start = match.index + match[0].indexOf(path);
-    if (start > lastIndex) parts.push(text.slice(lastIndex, start));
-    parts.push(
-      <button
-        key={`${start}-${path}`}
-        onClick={() => navigate(path)}
-        className="text-violet-400 hover:text-violet-300 hover:underline transition-colors"
-      >
-        {path}
-      </button>
-    );
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return <>{parts.length ? parts : text}</>;
-}
+
 
 // ── Code syntax highlighting ──
 // XXX: BAD one, use general lib

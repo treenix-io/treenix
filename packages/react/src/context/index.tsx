@@ -1,27 +1,25 @@
-import type { PresentationComponent, PresentationNode } from '#tree/presentation';
+import type { PresentationComponent,PresentationNode } from '#tree/presentation';
 // Treenix React Binding — Layer 2
 // <Render> + <RenderContext> + <NodeProvider>
 // Depends on: source-owned client contexts, React
 
 import { useTreeEffects } from '#hooks';
 import { useClientRegistry } from './client-registry-context';
-import { formatContext, parseContext } from '#context/selectors';
-import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
-import { $key, $node, componentLocation } from '#symbols';
-import { type OnChange, scopeOnChange } from '#tree/on-change';
+import { formatContext,parseContext } from '#context/selectors';
+import { READ_ONLY_EFFECTS,type TreeEffects } from '#tree/effects';
+import { $key,$node,componentLocation } from '#symbols';
+import { type OnChange,scopeOnChange } from '#tree/on-change';
 import type { Actions as CoreActions } from '@treenx/core/comp';
 import {
-  getComponentByName,
-  type ComponentData,
-  type NodeData,
+getComponentByName,type NodeData
 } from '@treenx/core';
 import {
-  createContext,
-  createElement,
-  type FC,
-  type ReactNode,
-  useContext,
-  useMemo,
+createContext,
+createElement,
+type FC,
+type ReactNode,
+useContext,
+useMemo,
 } from 'react';
 
 // ── Tree context (base and inherited modifiers) ──

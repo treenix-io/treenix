@@ -2,10 +2,10 @@
 // Type-dispatched validator tree: type check → dispatch → type-specific constraints + recurse
 // kriz: this should be somewhere near schema!! not in comp!
 
-import { type ComponentData, isCompKey } from '#core';
+import { isCompKey } from '#core';
 import { KernelError } from '#errors';
 import type { Component } from '#kernel/types';
-import type { PropertySchema, TypeSchema } from '#schema/types';
+import type { PropertySchema } from '#schema/types';
 import { createBoundedCache } from '#util/bounded-cache';
 import { isRecord } from '#util/is-record';
 

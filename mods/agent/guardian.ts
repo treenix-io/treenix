@@ -1,7 +1,7 @@
 // Pure tool-policy resolution and shell command classification.
 
 import { type PermissionRule } from '#metatron/permissions';
-import { globMatch, matchesAny } from '@treenx/core/glob';
+import { globMatch,matchesAny } from '@treenx/core/glob';
 
 // ── Specificity-aware policy resolution ──
 
@@ -124,15 +124,8 @@ export function buildPermissionRules(_role: string): PermissionRule[] {
 }
 
 
-// ── Always-deny bash patterns (non-negotiable safety net) ──
 
-const DANGEROUS_BASH = [
-  /rm\s+-rf/, /push\s+--force/, /reset\s+--hard/, /--no-verify/,
-  /curl\b.*\|\s*(?:ba)?sh/, /wget\b.*\|\s*(?:ba)?sh/,   // pipe-to-shell
-  /\beval\s+/,                                             // arbitrary eval
-  /chmod\s+777/, /chmod\s+\+s/,                            // permission escalation
-  /\bdd\s+.*of=\/dev\//, /\bmkfs\b/,                      // disk destruction
-];
+
 
 // ── Shell metacharacter detection ──
 // Commands containing these are not safe for word-based classification —

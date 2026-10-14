@@ -8,18 +8,27 @@ const config: KnipConfig = {
       ignoreDependencies: [
         // d3 used by mods (mindmap, three) — hoisted to root
         'd3-hierarchy', 'd3-selection', 'd3-shape', 'd3-transition', 'd3-zoom',
+        '@types/d3-selection', '@types/d3-transition', '@types/d3-zoom',
       ],
     },
 
-    // Core — server entry, tests, mod system
+    // Core — public server entry, native discovery, and worker boundaries.
     'core': {
       entry: [
         'src/server/main.ts',
-        'src/server/factory.ts',
-        'src/mods/clients.ts',
+        'src/server/native-main.ts',
+        'src/server/backup-cli.ts',
         'src/mods/servers.ts',
-        'src/mod/examples/*/service.ts',
+        'src/mods/*/kernel.ts',
+        'src/kernel/source-worker.ts',
+        'src/kernel/source-worker-bootstrap.ts',
+        'src/mod/examples/*/kernel.ts',
         'src/mod/examples/*/view.tsx',
+        'src/mod/examples/*/types.ts',
+        'src/**/*.typecheck.ts',
+        'src/schema/_import-fixtures/*.ts',
+        'src/**/*.test.ts',
+        'bin/*.mjs',
       ],
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
@@ -33,10 +42,12 @@ const config: KnipConfig = {
       entry: [
         'src/index.ts',
         'src/app/main.tsx',
+        'src/native/main.tsx',
         'src/app/Treenix.tsx',
         'src/mods/clients.ts',
         'src/mods/servers.ts',
         'vite-plugin.ts',
+        'src/**/*.test.ts',
       ],
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
@@ -51,10 +62,11 @@ const config: KnipConfig = {
         'clients.ts',
         '*/client.ts',
         '*/server.ts',
-        '*/service.ts',
+        '*/kernel.ts',
         '*/view.tsx',
         '*/seed.ts',
         '*/types.ts',
+        '**/*.test.ts',
       ],
       project: ['**/*.ts', '**/*.tsx'],
     },
@@ -72,6 +84,7 @@ const config: KnipConfig = {
 
   // shadcn UI components — used on demand, not all statically imported
   ignore: [
+    'core/src/lab/**',
     '**/components/ui/**',
     '**/components/lib/**',
   ],

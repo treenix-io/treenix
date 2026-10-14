@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe,it } from 'node:test'
 import { KernelError } from '#errors'
-import { authManifest, authKeyInput, prepareAdmin } from '#kernel/auth-module'
+import { authManifest,authKeyInput,prepareAdmin } from '#kernel/auth-module'
 import { prepareCredential } from '#kernel/auth/credentials'
-import { fixture, put } from '#kernel/contract/changeset-fixture'
+import { fixture,put } from '#kernel/contract/changeset-fixture'
 import { createRegistry } from '#kernel/registry'
 import { createChainIndex } from '#kernel/chain-index'
 import { computeRights } from '#kernel/rights'
 import { createProjector } from '#kernel/projection'
-import { A, R, W, type Actor, type ChangeMember, type NodeInput } from '#kernel/types'
+import { A,R,W,type Actor,type ChangeMember,type NodeInput } from '#kernel/types'
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 const delegated: Actor = { principal: 'u:delegate', claims: ['u:delegate', 'delegates', 'public', 'authenticated'] }
@@ -77,7 +77,7 @@ describe('native authentication records', () => {
     const nodes = await f.nodes(), index = createChainIndex()
     for (const node of nodes) index.put(node)
     const actor: Actor = { principal: `u:${account.$id}`, claims: [`u:${account.$id}`, 'admins', 'public', 'authenticated'] }
-    const project = createProjector({ registry: f.registry, alert: (path, error) => { throw error } })
+    const project = createProjector({ registry: f.registry, alert: (_path, error) => { throw error } })
     for (const node of nodes) if (['t.credentials', 't.session', 't.auth-key'].includes(node.$type)) {
       const rights = computeRights(actor, index.chain(node.$path), f.registry)
       assert.equal(rights.bits, W)

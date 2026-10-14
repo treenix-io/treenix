@@ -1,12 +1,12 @@
 // Launcher icons — react:launcher:icon context with iOS-style SVG icons
 
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { RenderProps } from '@treenx/react';
-import type { FC, ReactNode } from 'react';
+import type { FC,ReactNode } from 'react';
 
 // ── Icon shell — rounded rect with gradient + glow ──
 
-function IconShell({ children, g1, g2, glow }: {
+function IconShell({ children, g1, g2 }: {
   children: ReactNode; g1: string; g2: string; glow?: string;
 }) {
   const id = `g-${g1.replace('#', '')}`;
@@ -125,20 +125,7 @@ const WhisperIcon: FC<RenderProps> = () => (
 );
 
 // ── Sim (Network/Agents) ──
-const SimIcon: FC<RenderProps> = () => (
-  <IconShell g1="#06b6d4" g2="#0e7490">
-    {/* 3 connected nodes */}
-    <circle cx="60" cy="38" r="10" fillOpacity="0.9" />
-    <circle cx="38" cy="78" r="10" fillOpacity="0.7" />
-    <circle cx="82" cy="78" r="10" fillOpacity="0.7" />
-    {/* Connecting lines */}
-    <line x1="54" y1="46" x2="42" y2="70" stroke="white" strokeWidth="3" strokeOpacity="0.5" strokeLinecap="round" />
-    <line x1="66" y1="46" x2="78" y2="70" stroke="white" strokeWidth="3" strokeOpacity="0.5" strokeLinecap="round" />
-    <line x1="48" y1="78" x2="72" y2="78" stroke="white" strokeWidth="3" strokeOpacity="0.5" strokeLinecap="round" />
-    {/* Center pulse */}
-    <circle cx="60" cy="60" r="6" fillOpacity="0.4" />
-  </IconShell>
-);
+
 
 // ── Sensor (Thermometer + gauge) ──
 const SensorIcon: FC<RenderProps> = () => (

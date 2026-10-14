@@ -1,11 +1,10 @@
 // Mind map sidebar — shows selected node details
 // Lightweight panel: path, type, components, fields, actions
 
-import { useTreeEffects, usePath } from '@treenx/react';
-import { getActions, getComponents, getPlainFields } from '@treenx/react/mods/editor-ui/node-utils';
+import { useTreeEffects,usePath } from '@treenx/react';
+import { getActions,getComponents,getPlainFields } from '@treenx/react/mods/editor-ui/node-utils';
 import { useNativeTypeDescription } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
-import React from 'react';
 
 type Props = {
   path: string;
@@ -87,7 +86,7 @@ export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
                 <div key={key} className="mm-comp-card">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[12px] font-medium">{key}</span>
-                    <span className="mm-comp-type">{shortType((comp as any).$type)}</span>
+                    <span className="mm-comp-type">{shortType(comp.$type)}</span>
                   </div>
                   <div className="flex flex-col gap-0.5 mt-1">
                     {Object.entries(comp)

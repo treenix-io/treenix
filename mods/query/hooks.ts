@@ -1,5 +1,4 @@
 import type { PresentationNode } from '@treenx/react';
-import type { NodeData } from '@treenx/core';
 import { getComponents } from '@treenx/core';
 import { useMemo } from 'react';
 import { type QueryFilter } from './types';

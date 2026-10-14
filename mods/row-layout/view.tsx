@@ -1,17 +1,17 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, getComponents, type NodeData } from '@treenx/core'
-import { useClientRegistry } from '@treenx/react/context/client-registry-context'
-import { Render, RenderContext, type View } from '@treenx/react'
-import { useChildren } from '@treenx/react'
+import { type ComponentData,getComponents } from '@treenx/core';
+import { useClientRegistry } from '@treenx/react/context/client-registry-context';
+import { Render,RenderContext,type View } from '@treenx/react';
+import { useChildren } from '@treenx/react';
 import {
-  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
-  DropdownMenuSubContent, DropdownMenuSubTrigger,
-} from '@treenx/react/ui/dropdown-menu'
-import { useEffect, useState } from 'react'
-import { RowColGrid } from './lib/row-col-grid'
-import { isComponentRef, type LayoutItem, type LayoutRow } from './lib/types'
-import type { RowColLayout } from './types'
+DropdownMenuItem,DropdownMenuSeparator,DropdownMenuSub,
+DropdownMenuSubContent,DropdownMenuSubTrigger,
+} from '@treenx/react/ui/dropdown-menu';
+import { useEffect,useState } from 'react';
+import { RowColGrid } from './lib/row-col-grid';
+import { isComponentRef,type LayoutItem,type LayoutRow } from './lib/types';
+import type { RowColLayout } from './types';
 
 let _counter = 0
 const rid = () => `r${Date.now().toString(36)}${(_counter++).toString(36)}`

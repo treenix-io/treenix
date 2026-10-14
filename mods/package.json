@@ -1,7 +1,7 @@
 {
   "name": "@treenx/mods",
   "version": "3.0.17",
-  "description": "Official Treenix modules — board, sim, cafe, doc, mindmap, and more.",
+  "description": "Official Treenix modules \u2014 board, sim, cafe, doc, mindmap, and more.",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -72,7 +72,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "tsx --conditions development --test --test-concurrency=4 '**/*.test.ts'",
+    "test": "tsx --tsconfig ../tsconfig.base.json --conditions development --test --test-concurrency=4 '**/*.test.ts'",
     "build": "tsc -p tsconfig.build.json && fix-hash-imports --assets-dir=.",
     "prepack": "npm run build"
   },
@@ -106,7 +106,10 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^1.12.0",
     "react-grid-layout": "^2.2.3",
-    "abort-controller": "^3.0.0"
+    "abort-controller": "^3.0.0",
+    "zod": "^4.3.6",
+    "dayjs": "^1.11.20",
+    "sonner": "^2.0.7"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -143,6 +146,7 @@
     "grammy": "^1.42.0",
     "quickjs-emscripten": "^0.32.0",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "@treenx/jsonld-types": "^0.1.0"
   }
 }

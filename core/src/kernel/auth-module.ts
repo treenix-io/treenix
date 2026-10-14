@@ -7,7 +7,7 @@ import { assertNodeSchema } from '#kernel/schema'
 import { A, R, W, type AdminInput, type JsonSchema, type ModuleManifest, type NodeId, type NodeInput, type RuleInput, type TypeDef } from '#kernel/types'
 
 export const AUTH_KEY_PATH = '/sys/auth-key'
-export const AUTH_MODULE = 'treenix.auth'
+const AUTH_MODULE = 'treenix.auth'
 const ALL = R | W | A
 const groupPattern = '^(?!(?:u:|n:|anon:|public$|authenticated$)).+$'
 const validGroup = new RegExp(groupPattern)

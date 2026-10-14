@@ -1,24 +1,25 @@
 import { randomUUID } from 'node:crypto'
 import { KernelError } from '#errors'
-import { createBlobHolds, type BlobHoldSnapshot } from '#kernel/blob-holds'
+import { createBlobHolds,type BlobHoldSnapshot } from '#kernel/blob-holds'
 import { createBlobArchives } from '#kernel/blob-archives'
-import { blobIds, type BlobReferenceWork } from '#kernel/blob-references'
+import { blobIds,type BlobReferenceWork } from '#kernel/blob-references'
 import { decodeChainNode } from '#kernel/chain-index'
 import { comparePositions } from '#kernel/position'
 import { assertStoreCommit } from '#kernel/store/commit'
 import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
-import { DEFAULT_LIMITS, type Budget, type DecisionRange, type JournalCommit, type JournalRange, type Position,
-  type JournalPositionHeadRange, type JournalIntakeHeadRange, type DecisionMetadataRange,
-  type JournalPositionHead, type JournalIntakeHead, type DecisionMetadata,
-  type BlobArchiveMutation,
-  type StoreCensusQuery, type StoreCensusRange, type StoreCensusNode,
-  type OpId, type ScanQuery, type ScanRange, type ScanResult, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
+import {
+DEFAULT_LIMITS,type Budget,type DecisionRange,type JournalCommit,type JournalRange,type JournalPositionHeadRange,type JournalIntakeHeadRange,type DecisionMetadataRange,
+type JournalPositionHead,type JournalIntakeHead,type DecisionMetadata,
+type BlobArchiveMutation,
+type StoreCensusQuery,type StoreCensusRange,type StoreCensusNode,
+type OpId,type ScanQuery,type ScanRange,type ScanResult,type Store,type StoreCommit,type StoredNode
+} from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 import { transferImageDigest } from '#kernel/transfer-image'
 import { mapNodeForSift } from './keys'
 import { createJournalIndex } from '#kernel/store/journal-index'
-import { treeEnsure, treeNavigate, treeRemove, treeWalk, type TreeNode } from './nested-map'
+import { treeEnsure,treeNavigate,treeRemove,treeWalk,type TreeNode } from './nested-map'
 import { scanPage } from './scan'
 
 export interface MemoryStoreOptions {

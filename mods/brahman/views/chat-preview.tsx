@@ -2,11 +2,10 @@ import type { PresentationNode } from '@treenx/react';
 // Chat preview — Telegram-style visualization of page actions
 // Registered as react:chat for brahman.page
 
-import type { NodeData } from '@treenx/core';
-import { type View, useChildren } from '@treenx/react';
-import { Camera, File, Mic, Video } from 'lucide-react';
-import type { MenuRow, MenuType, PageConfig, TString } from '../types';
-import { actionIcon, actionSummary } from './action-cards';
+import { type View,useChildren } from '@treenx/react';
+import { Camera,File,Mic,Video } from 'lucide-react';
+import type { MenuRow,MenuType,PageConfig,TString } from '../types';
+import { actionIcon,actionSummary } from './action-cards';
 import { tstringPreview } from './tstring-input';
 
 // ── Helpers (browser-safe, no grammy import) ──
@@ -141,7 +140,7 @@ const FILE_ICONS: Record<string, React.ReactNode> = {
 
 // ── Action renderers ──
 
-function renderAction(node: PresentationNode, index: number, isFirstBubble: boolean): React.ReactNode {
+function renderAction(node: PresentationNode, _index: number, isFirstBubble: boolean): React.ReactNode {
   const c = getComponent(node);
   const type = node.$type;
 

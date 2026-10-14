@@ -145,14 +145,12 @@ async function runQuery(
   try {
     for await (const message of stream) {
       if (message.type === 'system' && message.subtype === 'init') {
-        sessionId = (message as any).session_id;
+        sessionId = message.session_id;
         log(`  session: ${sessionId}`);
       }
 
-      const msg = message as any;
-
-      if (message.type === 'assistant' && msg.message?.content) {
-        for (const block of msg.message.content) {
+      if (message.type === 'assistant') {
+        for (const block of message.message.content) {
           if (block.type === 'text' && block.text) {
             textChunks.push(block.text);
             append(block.text);
@@ -172,8 +170,8 @@ async function runQuery(
       }
 
       // tool results come as user messages with tool_result blocks
-      if (message.type === 'user' && msg.message?.content) {
-        for (const block of msg.message.content) {
+      if (message.type === 'user' && Array.isArray(message.message.content)) {
+        for (const block of message.message.content) {
           if (block.type === 'tool_result') {
             const content = extractToolResultText(block.content);
             append(`\n[result ${ts()}] ${content}\n`);
@@ -193,9 +191,9 @@ async function runQuery(
       }
 
       if (message.type === 'result') {
-        sessionId = msg.session_id ?? sessionId;
-        costUsd = msg.cost_usd;
-        isError = msg.is_error ?? false;
+        sessionId = message.session_id;
+        costUsd = message.total_cost_usd;
+        isError = message.is_error;
       }
     }
   } catch (err) {

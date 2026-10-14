@@ -4,42 +4,38 @@ import type { PresentationNode } from '@treenx/react';
 // Same visual as PageChatPreview but with inline editing
 
 import {
-  closestCenter,
-  DndContext,
-  type DragEndEvent,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
+closestCenter,
+DndContext,
+type DragEndEvent,
+KeyboardSensor,
+PointerSensor,
+useSensor,
+useSensors,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
+arrayMove,
+SortableContext,
+sortableKeyboardCoordinates,
+useSortable,
+verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { NodeData } from '@treenx/core';
 import { Button } from '@treenx/react/components/ui/button';
 import { Checkbox } from '@treenx/react/components/ui/checkbox';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
+import { Dialog,DialogContent,DialogFooter,DialogHeader,DialogTitle } from '@treenx/react/components/ui/dialog';
 import { Input } from '@treenx/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { useTreeEffects, useSave, type View, useChildren, usePath } from '@treenx/react';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/components/ui/select';
+import { useTreeEffects,useSave,type View,useChildren,usePath } from '@treenx/react';
 import { sanitizeHref } from '@treenx/react';
-import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type PageConfig, type TString } from '../types';
-import { actionIcon, actionSummary } from './action-cards';
-import { TStringLineInput, tstringPreview } from './tstring-input';
+import { Camera,File,GripVertical,Mic,MoreHorizontal,Plus,Trash2,Video } from 'lucide-react';
+import { useCallback,useEffect,useRef,useState } from 'react';
+import { ACTION_TYPES,MENU_TYPES,type MenuButton,type MenuRow,type MenuType,type PageConfig,type TString } from '../types';
+import { actionIcon,actionSummary } from './action-cards';
+import { TStringLineInput,tstringPreview } from './tstring-input';
 
 // ── Helpers ──
 
-function tstr(ts: TString | undefined): string {
-  if (!ts) return '';
-  return ts.ru || ts.en || Object.values(ts).find(v => v) || '';
-}
+
 
 function primaryLang(ts: TString | undefined): string {
   if (!ts) return 'ru';
@@ -48,38 +44,12 @@ function primaryLang(ts: TString | undefined): string {
   return Object.keys(ts)[0] ?? 'ru';
 }
 
-// ── TgHtml — safe Telegram HTML renderer ──
 
-const TG_TAGS: Record<string, string> = {
-  b: 'font-bold', strong: 'font-bold',
-  i: 'italic', em: 'italic',
-  u: 'underline', ins: 'underline',
-  s: 'line-through', strike: 'line-through', del: 'line-through',
-  code: 'font-mono text-[13px] bg-[#1a2636] px-1 rounded',
-  pre: 'font-mono text-[13px] bg-[#1a2636] p-2 rounded block overflow-x-auto',
-  blockquote: 'border-l-2 border-[#3d6a99] pl-2 italic',
-};
 
-function domToReact(node: Node, key: number): React.ReactNode {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-  if (node.nodeType !== Node.ELEMENT_NODE) return null;
-  const el = node as Element;
-  const tag = el.tagName.toLowerCase();
-  if (tag === 'br') return <br key={key} />;
-  if (tag === 'a') {
-    const href = el.getAttribute('href') || '#';
-    return <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-[#5b9bd5] underline">{Array.from(el.childNodes).map(domToReact)}</a>;
-  }
-  const cls = TG_TAGS[tag];
-  if (cls) return <span key={key} className={cls}>{Array.from(el.childNodes).map(domToReact)}</span>;
-  return Array.from(el.childNodes).map(domToReact);
-}
 
-function TgHtml({ text }: { text: string }) {
-  if (!/<[a-z][\s>]/i.test(text)) return <>{text}</>;
-  const doc = new DOMParser().parseFromString(text, 'text/html');
-  return <>{Array.from(doc.body.childNodes).map(domToReact)}</>;
-}
+
+
+
 
 // ── Editable text — click to edit, blur to save ──
 

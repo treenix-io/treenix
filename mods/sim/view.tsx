@@ -1,25 +1,25 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // AgentSim views — World map + Agent card + Item card
 // WorldView: controls, spatial map with entities + proximity links, event log
 // AgentView: profile, editable prompt, memory, event inbox
 // ItemView: description card
 
-import { getComponent, type NodeData } from '@treenx/core';
+import { getComponent } from '@treenx/core';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback,useMemo,useRef,useState } from 'react';
 import {
-  type EventEntry,
-  SimAi,
-  SimConfig,
-  SimDescriptive,
-  SimEvents,
-  SimMemory,
-  SimNearby,
-  SimPosition,
-  SimRound,
+type EventEntry,
+SimAi,
+SimConfig,
+SimDescriptive,
+SimEvents,
+SimMemory,
+SimNearby,
+SimPosition,
+SimRound,
 } from './types';
 
 type Link = { x1: number; y1: number; x2: number; y2: number; opacity: number };
@@ -66,9 +66,9 @@ const btn = {
 } as const;
 
 function formatAction(e: EventEntry): string {
-  const msg = (e.data as any)?.message;
+  const msg = e.data?.message;
   if (e.action.startsWith('speak') && msg) return `"${msg}"`;
-  if (e.action === 'move') return `→ (${(e.data as any).x}, ${(e.data as any).y})`;
+  if (e.action === 'move') return `→ (${e.data.x}, ${e.data.y})`;
   if (e.action.includes('→')) return e.action;
   return e.action;
 }
@@ -394,7 +394,7 @@ function AgentView() {
             <span style={{ color: 'var(--accent)' }}>{e.from}</span>
             <span>{e.type}{e.to ? `→${e.to}` : ''}</span>
             <span style={{ flex: 1, color: 'var(--text-3)' }}>
-              {(e.data as any)?.message ? `"${(e.data as any).message}"` : JSON.stringify(e.data).slice(0, 60)}
+              {e.data?.message ? `"${e.data.message}"` : JSON.stringify(e.data).slice(0, 60)}
             </span>
           </div>
         ))}

@@ -1,17 +1,17 @@
-import type { Editor, Range } from '@tiptap/core';
-import type {} from './slash-command';
+import type { Editor,Range } from '@tiptap/core';
+import type { } from './slash-command';
 import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { useTreeEffects } from '@treenx/react/hooks';
 import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
-import React, {
-  type FormEvent,
-  forwardRef,
-  type ReactNode,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
+import {
+type FormEvent,
+forwardRef,
+type ReactNode,
+useEffect,
+useImperativeHandle,
+useMemo,
+useRef,
+useState,
 } from 'react';
 
 export type SlashMenuItem = {
@@ -48,7 +48,11 @@ function normalizeLinkHref(value: string): string {
   return `https://${href}`;
 }
 
-export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, range, docPath }, ref) => {
+export interface SlashMenuHandle {
+  onKeyDown(props: { event: KeyboardEvent }): boolean;
+}
+
+export const SlashMenu = forwardRef<SlashMenuHandle, Props>(({ items, command, editor, range, docPath }, ref) => {
   const { createNode } = useTreeEffects();
 
   const [selectedIndex, setSelectedIndex] = useState(0);

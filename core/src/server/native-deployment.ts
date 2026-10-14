@@ -1,16 +1,14 @@
 import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
-import { evaluateModuleFactory, materializeModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleHost } from '#kernel/manifest';
+import { evaluateModuleFactory,materializeModule,type CollectedModule,type NativeModuleExports,type NativeModuleHost } from '#kernel/manifest';
 import type { NativeSeedDefinition } from '#mod/native-prefab';
 import type { InstanceFoundationWithAuth } from '#kernel/instance';
-import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
-import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
+import { openNativeRuntime,type NativeRuntimeConfig } from '#kernel/runtime';
+import { bindModuleIo,loadAllMods,moduleGates,type LoadResult } from '#mod/loader';
 import { KernelError } from '#errors';
 import { createLogsInput } from '#mods/logs/input';
 import { provisionLogs } from '#mods/logs/provision';
 import type { ActionIoBinding } from '#kernel/types';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export interface NativeModuleLocation {
   readonly id: string;

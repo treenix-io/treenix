@@ -1,8 +1,8 @@
 import { clientModules as declaredOwner0 } from './types';
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
-import { useActions, useChildren, view } from '@treenx/react';
+import { declareClientModule } from '@treenx/react/context/client-registry';
+import { useActions,useChildren,view } from '@treenx/react';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
-import { Idea, IdeasBoard } from './types';
+import { Idea,IdeasBoard } from './types';
 
 // ── Board view — renders children in list context ──
 

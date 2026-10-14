@@ -1,46 +1,46 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Board views — kanban board + task detail (editable)
 
 import {
-  DndContext,
-  type DragEndEvent,
-  type DragOverEvent,
-  DragOverlay,
-  type DragStartEvent,
-  pointerWithin,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
+DndContext,
+type DragEndEvent,
+type DragOverEvent,
+DragOverlay,
+type DragStartEvent,
+pointerWithin,
+PointerSensor,
+useDroppable,
+useSensor,
+useSensors,
 } from '@dnd-kit/core';
-import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { arrayMove,horizontalListSortingStrategy,SortableContext,useSortable,verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getComponent, type NodeData } from '@treenx/core';
-import { Render, RenderContext, useActions, useDraft, type View } from '@treenx/react';
-import { useTreeEffects, useChildren, useNavigate, usePath } from '@treenx/react';
+import { getComponent,type NodeData } from '@treenx/core';
+import { Render,RenderContext,useActions,useDraft,type View } from '@treenx/react';
+import { useTreeEffects,useChildren,usePath } from '@treenx/react';
 import { usePathSave } from '@treenx/react';
 import { cleanSlug } from '@treenx/react/lib/string-utils';
 import { minimd } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@treenx/react/ui/dialog';
+import { Dialog,DialogContent,DialogTitle } from '@treenx/react/ui/dialog';
 import { FormField } from '@treenx/react/ui/form-field';
 import { Input } from '@treenx/react/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+Select,
+SelectContent,
+SelectItem,
+SelectTrigger,
+SelectValue,
 } from '@treenx/react/ui/select';
 import { Textarea } from '@treenx/react/ui/textarea';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo,useRef,useState } from 'react';
 import { toast } from 'sonner';
-import { AttachMenu , clientModules as declaredClient0 } from '../simple-components/view';
+import { AttachMenu,clientModules as declaredClient0 } from '../simple-components/view';
 import { getNamedComponents } from './named-components';
-import { columnData, orderComponent } from './data';
-import { BoardColumn, BoardKanban, BoardTask, Order } from './types';
+import { columnData,orderComponent } from './data';
+import { BoardColumn,BoardKanban,BoardTask,Order } from './types';
 
 type TaskStatus = string;
 
@@ -524,7 +524,7 @@ function TaskCard({
   onSelect: (path: string) => void;
   colStatus: string;
 }) {
-  const { data: proxy } = usePath(task.$path, BoardTask);
+  
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.$path,
     data: { task, status: colStatus },
@@ -749,7 +749,7 @@ function TaskDialog({
 
 // ── Kanban Board ──
 
-const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, editable = false }) => {
+const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ ctx, editable = false }) => {
   const { createNode, execute } = useTreeEffects();
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const draft = useDraft('board.task');

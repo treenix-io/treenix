@@ -3,11 +3,11 @@
 
 import { createClientRegistry } from '#context/client-registry';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { beforeEach,describe,it } from 'node:test';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { compileComponent, invalidateCache } from './compile';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { compileComponent,invalidateCache } from './compile';
+import { cleanup,fireEvent,render } from '@testing-library/react';
 
 beforeEach(() => invalidateCache());
 
@@ -189,13 +189,9 @@ export default Multi;`;
 
   it('invalidateCache clears specific type', () => {
     const code1 = `export default function A({ value }) { return <div>a</div>; }`;
-    const code2 = `export default function A({ value }) { return <div>b</div>; }`;
-    compileComponent('test.inv', code1);
+    const original = compileComponent('test.inv', code1);
     invalidateCache('test.inv');
-    // After invalidation, new code should compile fresh
-    // (register will throw on duplicate, so we test cache miss)
-    // Actually register throws on duplicate — let's just verify invalidateCache doesn't throw
-    assert.ok(true, 'invalidateCache should not throw');
+    assert.notEqual(compileComponent('test.inv', code1), original);
   });
 
   it('throws on empty code with no component', () => {

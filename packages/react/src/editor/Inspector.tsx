@@ -5,7 +5,7 @@ import type { Node } from '@treenx/core/kernel/types';
 import './Inspector.css';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 import { ScrollArea } from '#components/ui/scroll-area';
-import { NodeProvider, Render, RenderContext } from '#context';
+import { NodeProvider,Render,RenderContext } from '#context';
 import { usePath } from '#hooks';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
 import { useSave } from '#tree/auto-save';
@@ -23,7 +23,7 @@ type Props = {
 };
 
 /** Present the selected canonical node and capture its actual native save owner. */
-function SelectedInspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
+function SelectedInspector({ path, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
   const { data: node, loading, error } = usePath<Node>(path);
   const save = useSave(path ?? '', { autoSave: true });
   const [propsOpen, setPropsOpen] = useState(false);

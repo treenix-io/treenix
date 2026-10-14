@@ -1,6 +1,5 @@
-import { describe, it, before } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { register } from '@treenx/core';
 import type { NodeData } from '@treenx/core';
 import type { Reader } from '@treenx/core/kernel/types';
 import { createElement } from 'react';
@@ -19,16 +18,6 @@ const testRender: RenderFn = ({ node }) => {
 const deps = (routes: RouteIndex, reader: Reader) => ({ routes, reader, render: testRender });
 
 const emptyTree: Reader = { async read() { return { list: [], copies: [], at: [] }; } };
-
-before(() => {
-  // Register a minimal site view for the test type.
-  register(
-    'test.handler.page',
-    'site',
-    ({ value }: { value: NodeData & { heading?: string } }) =>
-      createElement('main', { 'data-page': value.heading }, value.heading ?? 'untitled'),
-  );
-});
 
 function req(pathname: string, opts: { preview?: boolean; admin?: boolean } = {}): SsrRequest {
   const q = new URLSearchParams();

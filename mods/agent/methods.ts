@@ -1,4 +1,4 @@
-import type { AiAgent, AiThread, AiPlan, AiPolicy } from '#agent/types';
+import type { AiAgent,AiThread,AiPlan,AiPolicy } from '#agent/types';
 
 export const agentMethods = {
   'ai.agent': {
@@ -22,10 +22,10 @@ export const agentMethods = {
       this.status = 'idle';
       this.lastRunAt = Date.now();
     },
-    block: function (this: AiAgent, data?: { /** Reason */ reason?: string }) {
+    block: function (this: AiAgent, _data?: { /** Reason */ reason?: string }) {
       this.status = 'blocked';
     },
-    fail: function (this: AiAgent, data?: { /** Error message */ error?: string }) {
+    fail: function (this: AiAgent, _data?: { /** Error message */ error?: string }) {
       this.status = 'error';
       this.currentTask = '';
     },

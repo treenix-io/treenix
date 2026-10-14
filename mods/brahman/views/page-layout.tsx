@@ -5,38 +5,37 @@ import type { PresentationNode } from '@treenx/react/tree/presentation';
 // so data must be on the node, not nested in node.page.
 
 import {
-  closestCenter,
-  DndContext,
-  type DragEndEvent,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
+closestCenter,
+DndContext,
+type DragEndEvent,
+KeyboardSensor,
+PointerSensor,
+useSensor,
+useSensors,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
+arrayMove,
+SortableContext,
+sortableKeyboardCoordinates,
+useSortable,
+verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { NodeData } from '@treenx/core';
 import { Button } from '@treenx/react/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+DropdownMenu,
+DropdownMenuContent,
+DropdownMenuItem,
+DropdownMenuTrigger,
 } from '@treenx/react/ui/dropdown-menu';
 import { Input } from '@treenx/react/ui/input';
-import { Render, type View } from '@treenx/react';
-import { useTreeEffects, useChildren, useNavigate, useSave } from '@treenx/react';
+import { Render,type View } from '@treenx/react';
+import { useTreeEffects,useChildren,useNavigate,useSave } from '@treenx/react';
 import type { PageConfig } from '../types';
-import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { ChevronDown,ChevronRight,GripVertical,Plus,Trash2 } from 'lucide-react';
+import { useCallback,useEffect,useState } from 'react';
 import { ACTION_TYPES } from '../types';
-import { actionIcon, actionSummary } from './action-cards';
+import { actionIcon,actionSummary } from './action-cards';
 
 // ── Action palette dropdown ──
 

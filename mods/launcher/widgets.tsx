@@ -2,11 +2,12 @@ import { declareClientModule, declareView } from '@treenx/react/context/client-r
 import type { PresentationNode } from '@treenx/react';
 // Launcher widgets — react:widget context for compact live views on the home screen
 
-import { type NodeData } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 import type { RenderProps, View } from '@treenx/react';
 import { cn, Render, useChildren } from '@treenx/react';
 import type { FC } from 'react';
 import { TodoItem } from '../todo/types';
+import { Order } from '../board/types';
 
 const KanbanWidget: FC<RenderProps> = ({ value }) => {
   const node = value as NodeData;
@@ -18,7 +19,7 @@ function KanbanWidgetInner({ path }: { path: string }) {
   const { data: children } = useChildren(path, { watch: true, watchNew: true });
   const columns = children
     .filter(c => c.$type === 'board.column')
-    .sort((a, b) => ((a as any).order ?? 0) - ((b as any).order ?? 0));
+    .sort((a, b) => (getComponent(a, Order)?.order ?? 0) - (getComponent(b, Order)?.order ?? 0));
 
   return (
     <div className="flex h-full flex-col justify-between gap-1">

@@ -1,37 +1,36 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 import {
-  type ComponentData,
-  getComponent,
-  isComponent,
-  type NodeData,
+type ComponentData,
+getComponent,
+isComponent
 } from '@treenx/core';
 import { parseURI } from '@treenx/core/uri';
 import type { JsonSchema } from '@treenx/core/kernel/types';
-import { Render, RenderContext, type ViewCtx } from '@treenx/react';
-import { useChildren, useSave } from '@treenx/react';
+import { Render,RenderContext,type ViewCtx } from '@treenx/react';
+import { useChildren,useSave } from '@treenx/react';
 import { useSchema } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
 import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
+Pagination,
+PaginationContent,
+PaginationEllipsis,
+PaginationItem,
+PaginationLink,
+PaginationNext,
+PaginationPrevious,
 } from '@treenx/react/ui/pagination';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+Table,
+TableBody,
+TableCell,
+TableHead,
+TableHeader,
+TableRow,
 } from '@treenx/react/ui/table';
 import { useMemo } from 'react';
-import type { ColumnConfig, UITable } from './types';
+import type { ColumnConfig,UITable } from './types';
 
 // ── Helpers ──
 

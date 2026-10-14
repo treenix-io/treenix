@@ -1,6 +1,6 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, isComponent, type NodeData } from '@treenx/core';
+import { type ComponentData,isComponent } from '@treenx/core';
 import type { JsonSchema } from '@treenx/core/kernel/types';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
@@ -9,13 +9,13 @@ import { Button } from '@treenx/react/ui/button';
 import { Checkbox } from '@treenx/react/ui/checkbox';
 import { Input } from '@treenx/react/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+Select,
+SelectContent,
+SelectItem,
+SelectTrigger,
+SelectValue,
 } from '@treenx/react/ui/select';
-import { useMemo, useState } from 'react';
+import { useMemo,useState } from 'react';
 import type { UITable } from './types';
 
 // ── Field tree types ──

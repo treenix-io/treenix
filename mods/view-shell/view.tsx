@@ -1,5 +1,4 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
-import * as React from 'react';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 // View shell — registered for t.view.shell. Public read-only view of any node
 // at the URL tail. Works in both `react` (client) and `site` (SSR) contexts:
 // no auth gate (SSR is anonymous-only by design), no mutations, no chrome.
@@ -8,19 +7,19 @@ import * as React from 'react';
 // Render context comes from ?ctx=<name> (default 'react') and is preserved
 // across navigations via useRouteShell's preserveQuery.
 
-import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
+import { EMPTY,RouteParamsContext } from '@treenx/react/context/route-params';
 import {
-  NavigateProvider,
-  NodeProvider,
-  Render,
-  RenderContext,
-  useAutoSave,
-  useLocation,
-  usePath,
-  useTreeEffects,
-  useReactivePathEvents,
-  type View,
-  view,
+NavigateProvider,
+NodeProvider,
+Render,
+RenderContext,
+useAutoSave,
+useLocation,
+usePath,
+useTreeEffects,
+useReactivePathEvents,
+type View,
+view,
 } from '@treenx/react';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ViewShell } from './types';

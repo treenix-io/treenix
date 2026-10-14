@@ -2,13 +2,13 @@ import './Tree.css';
 import { ConfirmDialog } from '#components/ConfirmDialog';
 import { Badge } from '#components/ui/badge';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+DropdownMenu,
+DropdownMenuContent,
+DropdownMenuItem,
+DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
 import { ChevronRightIcon } from 'lucide-react';
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback,useRef,useState,useSyncExternalStore } from 'react';
 import { usePath } from '#hooks';
 import { useTreeSource } from '#tree/tree-source-context';
 import type { TreeSource } from '#tree/tree-source';
@@ -125,7 +125,7 @@ function TreeNode({
   const childrenNodes = childrenSnapshot.data;
 
   const rowRef = useRef<HTMLDivElement>(null);
-  const [dragOver, setDragOver] = useState<'above' | 'below' | null>(null);
+  const [dragOver, ] = useState<'above' | 'below' | null>(null);
 
   const name = nodeName(path);
   const isExp = expanded.has(path);

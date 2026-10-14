@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { buildReplyMarkup, checkTags, formatTString, renderTemplate } from './helpers';
-import type { MenuRow, TString } from './types';
+import { describe,it } from 'node:test';
+import { buildReplyMarkup,checkTags,formatTString,renderTemplate } from './helpers';
+import type { MenuRow } from './types';
 
 describe('brahman template engine', () => {
   it('formatTString: exact lang', () => {

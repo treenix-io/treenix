@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rename } from 'node:fs/promises';
+import { mkdtemp,mkdir,rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { it, type TestContext } from 'node:test';
+import { it,type TestContext } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { KernelError } from '#errors';
 import { actionPublicationPath } from '#kernel/action-publication';
@@ -11,7 +11,7 @@ import { openNativeRuntime } from '#kernel/runtime';
 import { createMemoryStore } from '#kernel/store/memory';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
 import { drainSession } from '#kernel/session-delivery';
-import { R, W, A, type ActionIoScope, type Credential, type Io, type ModuleManifest, type Node, type OpId, type Position, type Session } from '#kernel/types';
+import { R,W,A,type ActionIoScope,type Credential,type Io,type ModuleManifest,type Node,type OpId,type Position } from '#kernel/types';
 
 declare module '#kernel/types' { interface Io { sourceTest?: { call(input: unknown): Promise<unknown> } } }
 const refused = (code: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === code;

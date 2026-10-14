@@ -421,24 +421,23 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
     "prepack": "npm run build",
-    "test": "tsx --conditions development --test --test-concurrency=4 'src/**/*.test.ts'",
-    "test:client": "tsx --conditions development --test src/client/handle.test.ts",
+    "test": "tsx --tsconfig ../tsconfig.base.json --conditions development --test --test-concurrency=4 'src/**/*.test.ts'",
+    "test:client": "tsx --tsconfig ../tsconfig.base.json --conditions development --test src/client/handle.test.ts",
     "dev:server": "tsx watch --conditions development src/server/native-main.ts",
     "schema": "tsx --conditions development src/schema/extract-schemas-oxc.ts src ../mods ../packages",
     "upgrade:kernel": "tsx --conditions development src/tools/upgrade-kernel.ts",
-    "test:upgrade-kernel": "tsx --conditions development --test src/tools/upgrade-kernel.test.ts"
+    "test:upgrade-kernel": "tsx --tsconfig ../tsconfig.base.json --conditions development --test src/tools/upgrade-kernel.test.ts"
   },
   "dependencies": {
-    "fast-json-patch": "^3.1.1",
-    "immer": "^11.1.4",
-    "zod": "^4.3.6"
+    "immer": "^11.1.4"
   },
   "optionalDependencies": {
     "@orama/orama": "^3.1.18"
   },
   "peerDependencies": {
     "quickjs-emscripten": "^0.32.0",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "vite": "^8.0.10"
   },
   "peerDependenciesMeta": {
     "quickjs-emscripten": {
@@ -446,12 +445,17 @@
     },
     "tsx": {
       "optional": true
+    },
+    "vite": {
+      "optional": true
     }
   },
   "devDependencies": {
     "oxc-parser": "^0.128.0",
     "quickjs-emscripten": "^0.32.0",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "@treenx/mods": "^3.0.17",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

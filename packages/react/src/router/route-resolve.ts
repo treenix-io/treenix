@@ -14,7 +14,7 @@ import type { PresentationNode } from '#tree/presentation';
 // @treenx/mods here would invert the package dependency direction (mods
 // peer-deps on react), so we mirror the field shape locally instead.
 
-import { getComponent, type NodeData } from '@treenx/core';
+import { getComponent } from '@treenx/core';
 
 /** Structural shape of the t.route component. The runtime class + schema
  *  live in engine/mods/router/types.ts — registered there by the mod loader. */

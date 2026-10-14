@@ -1,7 +1,7 @@
 {
   "name": "@treenx/ssr",
   "version": "0.1.1",
-  "description": "Server-side rendering for Treenix — tree-driven router, t.site / t.seo / t.route components, Tailwind v4 runtime JIT.",
+  "description": "Server-side rendering for Treenix \u2014 tree-driven router, t.site / t.seo / t.route components, Tailwind v4 runtime JIT.",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
     "prepack": "npm run build",
-    "test": "TSX_TSCONFIG_PATH=../react/tsconfig.json tsx --conditions development --test 'src/**/*.test.ts'",
+    "test": "tsx --tsconfig ../../tsconfig.base.json --conditions development --test 'src/**/*.test.ts'",
     "start": "node dist/front-server.js",
     "dev": "tsx --conditions=development src/front-server.ts"
   },
@@ -51,6 +51,7 @@
   "devDependencies": {
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "happy-dom": "^20.9.0"
   }
 }

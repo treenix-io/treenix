@@ -1,5 +1,5 @@
 import type { PresentationNode } from '#tree/presentation';
-import { getComponents as getComps, type ComponentData, type NodeData } from '@treenx/core';
+import { getComponents as getComps,type ComponentData } from '@treenx/core';
 import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
 import type { ClientRegistry } from '#context/client-registry';
 

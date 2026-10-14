@@ -2,7 +2,7 @@ import type { OperationReadCost } from '#kernel/store/budget';
 import type { NodeLaneImage } from '#kernel/lane';
 import type { ReadSet } from '#kernel/preconditions';
 import type { ScanKey } from '#kernel/store/scan';
-import type { ComputedNode, Cursor, ErrorCopy, NodeId, Path, Position, Row, Sort, SubSelector, ViewOwner, ScanRange, Budget, LaneOwnership } from '#kernel/types';
+import type { ComputedNode,Cursor,ErrorCopy,NodeId,Path,Position,Row,Sort,SubSelector,ViewOwner,ScanRange,LaneOwnership } from '#kernel/types';
 
 export interface LaneBranch {
   readonly covered: readonly NodeId[];

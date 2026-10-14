@@ -1,12 +1,14 @@
-import { viewOwner, isSelector, change as nativeChange } from '#kernel/input-boundary'
-export { isSelector } from '#kernel/input-boundary'
+import { viewOwner,isSelector,change as nativeChange } from '#kernel/input-boundary';
 import { safeJsonParse } from '#util/json';
-import { assertSafePath } from '#core/path'
-import { KernelError } from '#errors'
-import { serializeKernel } from '#kernel/serialization'
-import type { AclEntry, ChangeMember, Component, ComputedNode, ErrorCopy, Credential, Frame, IncludeSpec, Node, NodeCopy, NodeInput,
-  ActionDescriptor, LaneOwnership, LaneProducer, OpId, Position, Preconditions, Principal, ReadResult, Request, Row, Selector, UpdateOps } from '#kernel/types'
-import { isRecord } from '#util/is-record'
+import { assertSafePath } from '#core/path';
+import { KernelError } from '#errors';
+import { serializeKernel } from '#kernel/serialization';
+import type {
+AclEntry,Component,ComputedNode,ErrorCopy,Credential,Frame,Node,NodeCopy,NodeInput,
+ActionDescriptor,LaneOwnership,LaneProducer,OpId,Position,Preconditions,Principal,ReadResult,Request,Row
+} from '#kernel/types';
+import { isRecord } from '#util/is-record';
+export { isSelector } from '#kernel/input-boundary'
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -30,23 +32,6 @@ function opId(value: unknown): value is OpId {
 function credential(value: unknown): value is Credential {
   return isRecord(value) && keys(value, ['token']) && text(value.token)
 }
-function include(value: unknown): value is IncludeSpec {
-  const pending: unknown[] = [value]
-  while (pending.length > 0) {
-    const item = pending.pop()
-    if (!isRecord(item)) return false
-    if ('path' in item) { if (!keys(item, ['path']) || !path(item.path)) return false }
-    else {
-      if (!keys(item, ['ref', 'then']) || !text(item.ref) || item.then !== undefined && !Array.isArray(item.then)) return false
-      if (Array.isArray(item.then)) pending.push(...item.then)
-    }
-  }
-  return true
-}
-function window(value: unknown): value is NonNullable<Extract<Selector, { children: string }>['window']> {
-  return isRecord(value) && keys(value, ['limit', 'after', 'evict']) && integer(value.limit) && value.limit > 0
-    && optional(value.after, text) && (value.evict === undefined || value.evict === true)
-}
 function acl(value: unknown): value is AclEntry {
   if (!isRecord(value) || !isRecord(value.subject)) return false
   const subject = value.subject
@@ -66,24 +51,6 @@ export function isNodeInput(value: unknown): value is NodeInput {
 }
 function node(value: unknown): value is Node {
   return isRecord(value) && text(value.$id) && text(value.$rev) && nodeFields(value)
-}
-function update(value: unknown): value is UpdateOps {
-  return isRecord(value) && keys(value, ['$set', '$unset', '$inc', '$push']) && optional(value.$set, isRecord)
-    && optional(value.$push, isRecord) && (value.$unset === undefined || isRecord(value.$unset) && Object.values(value.$unset).every(item => item === true))
-    && (value.$inc === undefined || isRecord(value.$inc) && Object.values(value.$inc).every(item => typeof item === 'number' && Number.isFinite(item)))
-}
-function change(value: unknown): value is ChangeMember {
-  if (!isRecord(value)) return false
-  switch (value.op) {
-    case 'put': return keys(value, ['op', 'node']) && isNodeInput(value.node)
-    case 'patch': return keys(value, ['op', 'path', 'ops']) && path(value.path) && update(value.ops)
-    case 'remove': return keys(value, ['op', 'path']) && path(value.path)
-    case 'adopt':
-      case 'move': return keys(value, ['op', 'from', 'to']) && path(value.from) && path(value.to)
-    case 'restore': case 'undo': return keys(value, ['op', 'record']) && isRecord(value.record) && keys(value.record, ['pos', 'id'])
-      && isPosition(value.record.pos) && text(value.record.id)
-    default: return false
-  }
 }
 function preconditions(value: unknown): value is Preconditions {
   return isRecord(value) && keys(value, ['nodes', 'absent', 'selectors'])

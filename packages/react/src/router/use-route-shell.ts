@@ -7,14 +7,13 @@ import type { PresentationNode } from '#tree/presentation';
 // makeHref returns null when a path falls outside the route's prefix → the
 // shell's navigation context blocks links to anything outside this route.
 
-import { useCallback, useMemo } from 'react';
-import { type NodeData } from '@treenx/core';
+import { useCallback,useMemo } from 'react';
 import {
-  type NavigateApi, makeNavigateApi, navigateTo, useLocation,
+type NavigateApi,makeNavigateApi,navigateTo,useLocation,
 } from '#navigate';
 import { useRouteParams } from '#context/route-params';
 import {
-  getRoute, normalizePrefix, resolveTarget, type Route, urlKey,
+getRoute,normalizePrefix,resolveTarget,type Route,urlKey,
 } from './route-resolve';
 
 export type RouteShellOpts = {

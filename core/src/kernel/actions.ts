@@ -1,26 +1,26 @@
 import { getComponentField } from '#core/component'
-import { pairingOperation, preparePairing } from '#kernel/auth-pairing'
+import { pairingOperation,preparePairing } from '#kernel/auth-pairing'
 import { createHash } from 'node:crypto'
-import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate'
+import { assertSafeSchema,validateValue,type ValidationError } from '#comp/validate'
 import { KernelError } from '#errors'
-import { createActionControl, createReadActionContext, createWriteActionContext } from '#kernel/action-context'
+import { createActionControl,createReadActionContext,createWriteActionContext } from '#kernel/action-context'
 import { createActionDraft } from '#kernel/action-draft'
-import { intersectActionScope, scopedActionAdmission } from '#kernel/action-scope'
-import { resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs'
+import { intersectActionScope,scopedActionAdmission } from '#kernel/action-scope'
+import { resolveActionNeeds,type ResolvedActionNeeds } from '#kernel/action-needs'
 import { createChangeBuilder } from '#kernel/change-builder'
-import { changeSelectors, selectChangeStore, prepareChangeSet, prepareRoutedChangeSet, type ChangeExecutor, type ChangeSetOptions } from '#kernel/changeset'
-import type { CommandOptions, NodeActionBinding } from '#kernel/commands'
+import { changeSelectors,selectChangeStore,prepareChangeSet,prepareRoutedChangeSet,type ChangeSetOptions } from '#kernel/changeset'
+import type { CommandOptions,NodeActionBinding } from '#kernel/commands'
 import { runWithActionContext } from '#kernel/current-action'
 import { createSiftTest } from '#kernel/expr'
 import { judgeGates } from '#kernel/gates'
-import { componentEntries, createMigrator } from '#kernel/migrate'
+import { componentEntries,createMigrator } from '#kernel/migrate'
 import { checkPreconditions } from '#kernel/preconditions'
 import { positionToRev } from '#kernel/position'
 import { visibleNode } from '#kernel/projection'
 import { assertPost } from '#kernel/post'
-import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger } from '#kernel/reader'
-import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type Node, type OpId, type Outcome, type Path, type Position, type Principal, type StoredNode } from '#kernel/types'
+import { createReader,createReaderLedger,readerOperationCost,type ReaderLedger } from '#kernel/reader'
+import { createRequestAdmission,serializeRequest } from '#kernel/request'
+import { R,W,type ActRequest,type Io,type ActionDef,type ActionPieceDelivery,type ActionResult,type NestedActRequest,type Node,type OpId,type Outcome,type Path,type Position,type Principal,type StoredNode } from '#kernel/types'
 import type { MutationSpan } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 import { stableJson } from '#util/stable-json'
@@ -200,7 +200,7 @@ export function createActionRuntime(options: CommandOptions) {
         throw error;
       }
 
-      const { node, bits, ownComponent, definition, action } = classified;
+      const { node, bits, definition, action } = classified;
       if (
         request.anchor !== undefined &&
         (action.kind === 'read' ||

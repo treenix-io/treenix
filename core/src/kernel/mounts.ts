@@ -7,8 +7,8 @@ import type { AcceptedNodeRead } from '#kernel/writer'
 import { componentEntries } from '#kernel/migrate'
 import { ownMountTarget } from '#kernel/mount-resource'
 import type {
-  Budget, Component, ComponentName, MountDecl, MountHandler, Node, NodeId, OpenedMountTarget, OpenedStoreBinding, OpenedStoreMountTarget,
-  NodeMeta, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
+Budget,Component,ComponentName,MountDecl,MountHandler,Node,NodeId,OpenedMountTarget,OpenedStoreBinding,OpenedStoreMountTarget,
+NodeMeta,Path,Registry,Rev,ScanRange,Session,TypeDef,TypeName,
 } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
@@ -796,7 +796,7 @@ export function createMountTable(options: MountTableOptions) {
     /** Expose routing claims even while their target has not opened or has become invalid. */
     ranges(range?: ScanRange): readonly MountRange[] {
       if (range === undefined) return acceptedRanges
-      const address = addressOf(range)
+      
       return acceptedRanges.filter(claim => claim.intersects(range))
     },
     target(key: string, generation: string): OpenedMountTarget {

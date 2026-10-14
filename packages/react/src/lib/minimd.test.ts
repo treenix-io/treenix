@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe,it } from 'node:test';
 import { minimd } from './minimd';
 
 describe('minimd link sanitization', () => {
@@ -77,7 +77,7 @@ describe('minimd link sanitization', () => {
     // href uses double quotes, so single quotes inside are safe — no breakout
     assert.ok(html.includes("href=\"https://ok.com'"));
     // But verify no attribute injection occurred
-    const onclickCount = (html.match(/onclick/g) || []).length;
+    
     // The onclick is inside the href value, not a separate attribute
     assert.ok(!html.includes('" onclick='));
   });

@@ -1,27 +1,26 @@
 // Three.js scene view — renders Treenix node tree as a 3D scene graph
 // SceneView registered for t3d.scene in "react" context
 
-import { Billboard, OrbitControls, Text, Trail } from '@react-three/drei';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { getComponent, type NodeData } from '@treenx/core';
+import { Billboard,OrbitControls,Text,Trail } from '@react-three/drei';
+import { Canvas,useFrame } from '@react-three/fiber';
+import { getComponent } from '@treenx/core';
 import { useResolvedNode } from '@treenx/react/bind/hook';
 import { useTreeSource } from '@treenx/react/tree/tree-source-context';
-import { type View, useCurrentNode } from '@treenx/react';
-import { useTreeEffects, useChildren, usePath } from '@treenx/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type View } from '@treenx/react';
+import { useTreeEffects,useChildren,usePath } from '@treenx/react';
+import { useEffect,useMemo,useRef,useState } from 'react';
 import * as THREE from 'three';
 import {
-  T3dCamera,
-  T3dLight,
-  T3dLine,
-  T3dMaterial,
-  T3dMesh,
-  T3dObject,
-  T3dParticles,
-  T3dScene,
-  T3dScript,
-  T3dText,
-  T3dTrail,
+T3dLight,
+T3dLine,
+T3dMaterial,
+T3dMesh,
+T3dObject,
+T3dParticles,
+T3dScene,
+T3dScript,
+T3dText,
+T3dTrail
 } from './types';
 
 // --- Texture loader helper ---
@@ -388,7 +387,7 @@ function TreeNode({ path }: { path: string }) {
   const mesh = getComponent(node, T3dMesh);
   const material = getComponent(node, T3dMaterial);
   const light = getComponent(node, T3dLight);
-  const camera = getComponent(node, T3dCamera);
+  
   const text = getComponent(node, T3dText);
   const particles = getComponent(node, T3dParticles);
   const line = getComponent(node, T3dLine);

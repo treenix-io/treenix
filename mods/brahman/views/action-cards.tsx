@@ -2,57 +2,57 @@ import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Action type views — full editors (react) + compact cards (react:list)
 // Each action type gets: icon helper, summary helper, full editor, list item
 
-import type { ComponentData, NodeData } from '@treenx/core';
+import type { ComponentData } from '@treenx/core';
 import { Button } from '@treenx/react/ui/button';
 import { Checkbox } from '@treenx/react/ui/checkbox';
 import { Input } from '@treenx/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/ui/select';
 import { Textarea } from '@treenx/react/ui/textarea';
-import { useTreeEffects, useSave, type View, usePath } from '@treenx/react';
+import { useTreeEffects,useSave,type View,usePath } from '@treenx/react';
 import { KernelError } from '@treenx/core/errors';
 import {
-  AlertTriangle,
-  ArrowLeft,
-  Code,
-  Download,
-  File,
-  FileText,
-  Forward,
-  GitBranch,
-  Globe,
-  HelpCircle,
-  History,
-  MessageSquare,
-  Repeat,
-  RotateCcw,
-  Search,
-  Send,
-  Settings2,
-  Tag,
-  Trash2,
-  Upload,
+AlertTriangle,
+ArrowLeft,
+Code,
+Download,
+File,
+FileText,
+Forward,
+GitBranch,
+Globe,
+HelpCircle,
+History,
+MessageSquare,
+Repeat,
+RotateCcw,
+Search,
+Send,
+Settings2,
+Tag,
+Trash2,
+Upload,
 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode,useState } from 'react';
 import type {
-  BroadcastAction,
-  EmitTextAction,
-  EvalAction,
-  FileAction,
-  ForwardAction,
-  GetValueAction,
-  IfElseAction,
-  KeywordSelectAction,
-  MessageAction,
-  OnErrorAction,
-  PageNavAction,
-  ParamsAction,
-  QuestionAction,
-  SelectLanguageAction,
-  SetValueAction,
-  TagAction,
+BroadcastAction,
+EmitTextAction,
+EvalAction,
+FileAction,
+ForwardAction,
+GetValueAction,
+IfElseAction,
+KeywordSelectAction,
+MessageAction,
+OnErrorAction,
+PageNavAction,
+ParamsAction,
+QuestionAction,
+SelectLanguageAction,
+SetValueAction,
+TagAction,
 } from '../types';
 import { MenuEditor } from './menu-editor';
-import { TStringInput, tstringPreview } from './tstring-input';
+import { TStringInput,tstringPreview } from './tstring-input';
 
 // ── Icon mapping ──
 
@@ -137,7 +137,7 @@ function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function getLangs(node: PresentationNode): string[] {
+function getLangs(_node: PresentationNode): string[] {
   // Walk up to find bot config's langs
   // Default fallback
   return ['ru', 'en'];
@@ -154,7 +154,7 @@ function useActionComp(path: string) {
 
 // ── Full editors (react context) ──
 
-export const MessageEditor: View<MessageAction> = ({ value, ctx }) => {
+export const MessageEditor: View<MessageAction> = ({ ctx }) => {
   const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const msg = comp as unknown as MessageAction;
@@ -183,7 +183,7 @@ export const MessageEditor: View<MessageAction> = ({ value, ctx }) => {
   );
 }
 
-export const QuestionEditor: View<QuestionAction> = ({ value, ctx }) => {
+export const QuestionEditor: View<QuestionAction> = ({ ctx }) => {
   const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const q = comp as unknown as QuestionAction;
@@ -214,7 +214,7 @@ export const QuestionEditor: View<QuestionAction> = ({ value, ctx }) => {
   );
 }
 
-export const IfElseEditor: View<IfElseAction> = ({ value, ctx }) => {
+export const IfElseEditor: View<IfElseAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ie = comp as unknown as IfElseAction;
@@ -244,7 +244,7 @@ export const IfElseEditor: View<IfElseAction> = ({ value, ctx }) => {
   );
 }
 
-export const PageNavEditor: View<PageNavAction> = ({ value, ctx }) => {
+export const PageNavEditor: View<PageNavAction> = ({ ctx }) => {
   const effects = useTreeEffects();
   const { comp, update } = useActionComp(ctx!.path);
   const [dragOver, setDragOver] = useState(false);
@@ -292,7 +292,7 @@ export function BackEditor() {
   );
 }
 
-export const TagEditor: View<TagAction> = ({ value, ctx }) => {
+export const TagEditor: View<TagAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const t = comp as unknown as TagAction;
@@ -310,7 +310,7 @@ export const TagEditor: View<TagAction> = ({ value, ctx }) => {
   );
 }
 
-export const BroadcastEditor: View<BroadcastAction> = ({ value, ctx }) => {
+export const BroadcastEditor: View<BroadcastAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const b = comp as unknown as BroadcastAction;
@@ -329,7 +329,7 @@ export const BroadcastEditor: View<BroadcastAction> = ({ value, ctx }) => {
   );
 }
 
-export const GetValueEditor: View<GetValueAction> = ({ value, ctx }) => {
+export const GetValueEditor: View<GetValueAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const g = comp as unknown as GetValueAction;
@@ -348,7 +348,7 @@ export const GetValueEditor: View<GetValueAction> = ({ value, ctx }) => {
   );
 }
 
-export const SetValueEditor: View<SetValueAction> = ({ value, ctx }) => {
+export const SetValueEditor: View<SetValueAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const s = comp as unknown as SetValueAction;
@@ -367,7 +367,7 @@ export const SetValueEditor: View<SetValueAction> = ({ value, ctx }) => {
   );
 }
 
-export const ParamsEditor: View<ParamsAction> = ({ value, ctx }) => {
+export const ParamsEditor: View<ParamsAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const p = comp as unknown as ParamsAction;
@@ -389,7 +389,7 @@ export const ParamsEditor: View<ParamsAction> = ({ value, ctx }) => {
   );
 }
 
-export const FileEditor: View<FileAction> = ({ value, ctx }) => {
+export const FileEditor: View<FileAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const f = comp as unknown as FileAction;
@@ -421,7 +421,7 @@ export const FileEditor: View<FileAction> = ({ value, ctx }) => {
 
 // ── New action editors ──
 
-export const EvalEditor: View<EvalAction> = ({ value, ctx }) => {
+export const EvalEditor: View<EvalAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ev = comp as unknown as EvalAction;
@@ -448,7 +448,7 @@ export function RemoveEditor() {
   );
 }
 
-export const EmitTextEditor: View<EmitTextAction> = ({ value, ctx }) => {
+export const EmitTextEditor: View<EmitTextAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const et = comp as unknown as EmitTextAction;
@@ -463,7 +463,7 @@ export const EmitTextEditor: View<EmitTextAction> = ({ value, ctx }) => {
   );
 }
 
-export const ForwardEditor: View<ForwardAction> = ({ value, ctx }) => {
+export const ForwardEditor: View<ForwardAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const fw = comp as unknown as ForwardAction;
@@ -498,7 +498,7 @@ export function ResetHistoryEditor() {
   );
 }
 
-export const OnErrorEditor: View<OnErrorAction> = ({ value, ctx }) => {
+export const OnErrorEditor: View<OnErrorAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const oe = comp as unknown as OnErrorAction;
@@ -517,7 +517,7 @@ export const OnErrorEditor: View<OnErrorAction> = ({ value, ctx }) => {
   );
 }
 
-export const KeywordSelectEditor: View<KeywordSelectAction> = ({ value, ctx }) => {
+export const KeywordSelectEditor: View<KeywordSelectAction> = ({ ctx }) => {
   const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ks = comp as unknown as KeywordSelectAction;
@@ -571,7 +571,7 @@ export const KeywordSelectEditor: View<KeywordSelectAction> = ({ value, ctx }) =
   );
 }
 
-export const SelectLanguageEditor: View<SelectLanguageAction> = ({ value, ctx }) => {
+export const SelectLanguageEditor: View<SelectLanguageAction> = ({ ctx }) => {
   const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const sl = comp as unknown as SelectLanguageAction;

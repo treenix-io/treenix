@@ -2,14 +2,14 @@ import { KernelError } from '#errors'
 import { createActionControl } from '#kernel/action-context'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { ReadSet } from '#kernel/preconditions'
-import type { LaneDeliveryImage, LaneProjection, LaneSelection, LaneRoot } from '#kernel/lane-selection'
-import { compareScanKeys, scanKey, type ScanKey } from '#kernel/store/scan'
+import type { LaneDeliveryImage,LaneProjection,LaneSelection,LaneRoot } from '#kernel/lane-selection'
+import { compareScanKeys,scanKey,type ScanKey } from '#kernel/store/scan'
 import { serializeKernel } from '#kernel/serialization'
 import { revToPosition } from '#kernel/position'
 import type { OperationReadCost } from '#kernel/store/budget'
 import type { FederationClient } from '#kernel/authority/owner'
 import type { createAuthorityNamespace } from '#kernel/authority/namespace'
-import type { Bits, LaneOwnership, NodeCopy, Path, ReadResult, ScanRange, SubSelector } from '#kernel/types'
+import type { Bits,NodeCopy,Path,ReadResult,ScanRange,SubSelector } from '#kernel/types'
 
 interface ForeignRoot extends LaneRoot {
   readonly member: NonNullable<LaneRoot['member']>

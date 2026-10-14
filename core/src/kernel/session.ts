@@ -33,7 +33,7 @@ export interface ActorResolution {
 const ANONYMOUS_TTL = 365 * 24 * 60 * 60 * 1000
 const unauthenticated = () => new KernelError('UNAUTHENTICATED', 'Invalid credential')
 
-export function authGroups(node: StoredNode, registry: Registry): readonly string[] {
+function authGroups(node: StoredNode, registry: Registry): readonly string[] {
   const result: string[] = []
   for (const [, component] of componentEntries(node)) {
     if (registry.type(component.$type).name !== 't.groups') continue

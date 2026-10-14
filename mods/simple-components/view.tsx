@@ -1,17 +1,16 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Universal component views — compact, embeddable in any node
 
-import { type NodeData } from '@treenx/core';
-import { type View, useActions } from '@treenx/react';
+import { type View,useActions } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
-import { useEffect, useRef, useState } from 'react';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@treenx/react/ui/select';
+import { useEffect,useRef,useState } from 'react';
 import { toast } from 'sonner';
-import { ATTACHABLE_COMPONENTS, TChecklist, TComments, TEstimate, TLinks, TTags, TTimeTrack } from './types';
+import { ATTACHABLE_COMPONENTS,TChecklist,TComments,TEstimate,TLinks,TTags,TTimeTrack } from './types';
 
 // ── Section wrapper ──
 
@@ -357,7 +356,7 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
   const actions = useActions(value);
   const entries = value.entries;
   const running = value.running;
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!running) return;

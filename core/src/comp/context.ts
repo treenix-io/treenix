@@ -24,10 +24,10 @@ type ActionContextRuntime = {
  *  synchronous span of the action only — enough for optimistic prediction
  *  (core-anz4.18). Sync windows are atomic in JS, so nesting restores via
  *  finally and continuations after await deterministically see undefined —
- *  no cross-action leak. The server installs AsyncLocalStorage instead. */
+ *  no cross-action leak. */
 let syncCtx: ExecCtx | undefined;
 
-const directRuntime: ActionContextRuntime = {
+const runtime: ActionContextRuntime = {
   get: () => syncCtx,
   run(ctx, action) {
     const prev = syncCtx;
@@ -39,12 +39,6 @@ const directRuntime: ActionContextRuntime = {
     }
   },
 };
-
-let runtime = directRuntime;
-
-export function installActionContextRuntime(next: ActionContextRuntime): void {
-  runtime = next;
-}
 
 export function currentExecCtx(): ExecCtx | undefined {
   return runtime.get();

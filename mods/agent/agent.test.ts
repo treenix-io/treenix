@@ -1,28 +1,26 @@
 // Agent Office tests — types (state machine) + guardian (policy registry)
 
-import { createNode, getComponent, compKey } from '@treenx/core';
+import { createNode,getComponent,compKey } from '@treenx/core';
 import { createInstance } from '../../core/src/kernel/instance';
 import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
 import { createMemoryStore } from '@treenx/core/kernel/store/memory';
 import type { Position } from '@treenx/core/kernel/types';
 import { nativeAgentTypes } from './native-manifest';
 import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
+import { after,before,describe,it } from 'node:test';
 
 import './types';
-import { buildPermissionRules, classifyBashCommand, resolveVerdict, splitBashParts } from './guardian';
+import { buildPermissionRules,classifyBashCommand,resolveVerdict,splitBashParts } from './guardian';
 import {
-  AiAgent,
-  AiAssignment,
-  AiCost,
-  AiLog,
-  AiPlan,
-  AiPolicy,
-  AiPool,
-  AiRun,
-  AiRunStatus,
-  AiThread,
-  type ThreadMessage,
+AiAgent,
+AiAssignment,
+AiCost,
+AiLog,
+AiPlan,
+AiPolicy,
+AiPool,
+AiRun,
+AiRunStatus,type ThreadMessage
 } from './types';
 
 const manifest = { id: 'agent-contract', types: nativeAgentTypes('agent-contract'), security: [], open: [] };
@@ -345,7 +343,7 @@ describe('AiPlan', () => {
     const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: '', approved: false, feedback: '', createdAt: 0 },
     });
-    const plan = getComponent(node, AiPlan)!;
+    
     await assert.rejects(
       () => callAction(node, 'approvePlan', {}, 'plan'),
       (e: Error) => e.message.includes('no plan'),

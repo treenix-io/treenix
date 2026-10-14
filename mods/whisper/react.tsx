@@ -1,12 +1,11 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Whisper channel view — checklist of transcribed audio notes
 
-import * as React from 'react';
 import dayjs from 'dayjs';
-import { getComponent, type NodeData } from '@treenx/core';
-import { useTreeEffects, type View, useChildren } from '@treenx/react';
-import { WhisperChannel, WhisperMeta, WhisperText } from './types';
+import { getComponent } from '@treenx/core';
+import { useTreeEffects,type View,useChildren } from '@treenx/react';
+import { WhisperChannel,WhisperMeta,WhisperText } from './types';
 
 function transcriptionText(node: PresentationNode): string {
   const text = getComponent(node, WhisperText);

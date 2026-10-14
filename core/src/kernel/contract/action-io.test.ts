@@ -1,14 +1,14 @@
 import { instantiateModule } from '@treenx/core/kernel/manifest';
-import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { nativeDeclaredModule,type NativeClassDeclaration } from '@treenx/mods/native-module';
 import { normalizeType } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
-import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
+import type { ActionDef,SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir,mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
-import { describe, it, type TestContext } from 'node:test';
+import { describe,it,type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
@@ -19,19 +19,19 @@ import { drainSession } from '#kernel/session-delivery';
 import { scanBudget } from '#kernel/store/contract';
 import { createMemoryStore } from '#kernel/store/memory';
 import {
-  R,
-  W,
-  type ActionIoScope,
-  type Credential,
-  type Gate,
-  type Io,
-  type Node,
-  type OpId,
-  type Pending,
-  type Position,
-  type PositionCounter,
-  type TypeDef,
-  type WriteActionContext,
+R,
+W,
+type ActionIoScope,
+type Credential,
+type Gate,
+type Io,
+type Node,
+type OpId,
+type Pending,
+type Position,
+type PositionCounter,
+type TypeDef,
+type WriteActionContext,
 } from '#kernel/types';
 
 interface ExternalCapability {
@@ -120,7 +120,7 @@ function held(entered: ReturnType<typeof event>, release: ReturnType<typeof even
 
 /** Collects real definitions without attaching handlers to an ambient actor. */
 async function moduleFor(
-  t: TestContext,
+  _t: TestContext,
   actions: TypeDef['actions'],
   forms: TypeDef['actions'] = {},
 ) {

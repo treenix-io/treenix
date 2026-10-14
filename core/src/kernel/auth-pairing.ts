@@ -5,7 +5,7 @@ import type { AuthReadSource } from '#kernel/session';
 import { hashAgentKey, timingSafeCompare, AGENT_SESSION_TTL } from '#security/agent';
 import { R, W, type ActionDef, type ChangeMember, type Principal, type StoredNode, type TypeDef } from '#kernel/types';
 
-export const PAIRING_MODULE = 'treenix.auth';
+const PAIRING_MODULE = 'treenix.auth';
 type PairingOperation = 'initPair' | 'approve' | 'connect' | 'revoke' | 'reset';
 const operations = new Map<Function, PairingOperation>();
 
@@ -49,7 +49,7 @@ export function pairingOperation(type: TypeDef, definition: ActionDef): PairingO
 }
 
 /** Closed state contains the key hash and account binding; the public port carries only lifecycle state. */
-export function pairingPath(id: string): string {
+function pairingPath(id: string): string {
   return `/sys/agent-pairing/${id}`;
 }
 

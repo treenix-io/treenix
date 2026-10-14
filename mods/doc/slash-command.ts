@@ -1,7 +1,7 @@
 import { Extension } from '@tiptap/core';
 import { ReactRenderer } from '@tiptap/react';
 import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion';
-import { SlashMenu, type SlashMenuItem } from './slash-menu';
+import { SlashMenu, type SlashMenuHandle, type SlashMenuItem } from './slash-menu';
 
 const defaultItems: SlashMenuItem[] = [
   {
@@ -104,7 +104,7 @@ export const SlashCommand = Extension.create<any, { docPath: string }>({
             item.title.toLowerCase().includes(query.toLowerCase()),
           ),
         render: () => {
-          let component: ReactRenderer;
+          let component: ReactRenderer<SlashMenuHandle>;
 
           return {
             onStart: (props: any) => {
@@ -127,7 +127,7 @@ export const SlashCommand = Extension.create<any, { docPath: string }>({
                 component?.destroy();
                 return true;
               }
-              return (component?.ref as any)?.onKeyDown?.(props) ?? false;
+              return component?.ref?.onKeyDown(props) ?? false;
             },
 
             onExit: () => {

@@ -35,7 +35,7 @@ export function evaluatePermission(
   input: unknown,
 ): PermissionPolicy | null {
   const inputPath = (input && typeof input === 'object' && 'path' in input)
-    ? String((input as any).path)
+    ? String(input.path)
     : '';
 
   // Find all matching rules

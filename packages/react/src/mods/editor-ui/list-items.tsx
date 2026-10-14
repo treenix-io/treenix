@@ -4,11 +4,10 @@ import type { PresentationNode } from '#tree/presentation';
 // chrome wrapper <RenderChildren>. Convention: items render CONTENT only (no border, no click,
 // no fixed width) — chrome and navigation are the observer's responsibility.
 
-import { NodeProvider, Render, RenderContext } from '#context';
+import { NodeProvider,Render,RenderContext } from '#context';
 import { useClientRegistry } from '#context/client-registry-context';
 import { componentEntries } from '@treenx/core/kernel/migrate';
 import { useNavigate } from '#navigate';
-import type { NodeData } from '@treenx/core';
 import type { ReactNode } from 'react';
 
 const TYPE_ICONS: Record<string, string> = {

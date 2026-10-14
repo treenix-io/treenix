@@ -1,16 +1,15 @@
-import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { declareClientModule,declareView } from '@treenx/react/context/client-registry';
 // MindMap View — Miro-style horizontal tree with organic curves
 // Each node fetches its own children via useChildren when expanded
 
-import type { NodeData } from '@treenx/core';
 import type { View } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
-import { zoom as d3zoom, type D3ZoomEvent, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type EditingAt, MindMapBranch, MindMapCtx, type MindMapState } from './branch';
+import { zoom as d3zoom,type D3ZoomEvent,type ZoomBehavior,zoomIdentity } from 'd3-zoom';
+import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import { type EditingAt,MindMapBranch,MindMapCtx,type MindMapState } from './branch';
 import { MindMapSidebar } from './sidebar';
 import type { MindMapConfig } from './types';
 import './mindmap.css';

@@ -5,9 +5,8 @@
 
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { describe, it } from 'node:test';
+import { describe,it } from 'node:test';
 // Unused on purpose: tsc fails if the kernel door stops carrying the normative types.
-import type { Session, Store } from '@treenx/core/kernel';
 import { createInstance } from '#kernel/instance';
 
 const PUBLIC_DOORS = [
