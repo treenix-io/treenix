@@ -148,14 +148,14 @@ function SortableAction({
         <Button
           variant="ghost"
           size="sm"
-          className="p-0 h-auto text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100"
+          className="p-0 h-auto text-xs text-muted-foreground"
           onClick={(e) => {
             e.stopPropagation();
             onSelect();
           }}
-          title="Select in tree"
+          title="Open action settings"
         >
-          &#8599;
+          Settings
         </Button>
 
         <Button
