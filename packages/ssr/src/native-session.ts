@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KernelError } from '@treenx/core/errors';
 import { openTwpHttp } from '@treenx/core/client/http-twp';
 import { createTwpClient } from '@treenx/core/client/twp';
+import { parseSessionCookie } from '@treenx/core/security';
 
 /** Bind route discovery and rendering to this request's credential and cancellation. */
 export async function openSsrSession(
@@ -21,6 +22,7 @@ export async function openSsrSession(
     const value = request.headers[name];
     if (typeof value === 'string') headers[name] = value;
   }
+  const token = headers.authorization === undefined ? parseSessionCookie(headers.cookie) : null;
   let closeTransport: (() => void) | undefined;
   function close() {
     closeTransport?.();
@@ -32,6 +34,8 @@ export async function openSsrSession(
     const connection = await openTwpHttp({
       url,
       headers,
+      // SSR authenticates its own POST; ordinary browser navigation has no Origin header.
+      credential: token === null ? undefined : { token },
       signal: controller.signal,
       credentials: headers.cookie === undefined ? 'omit' : 'include',
     });

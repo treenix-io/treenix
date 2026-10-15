@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { createServer } from 'node:http';
+import { createServer, IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 import { it } from 'node:test';
 import { KernelError } from '@treenx/core/errors';
 import { createTwpHttpServer } from '../../../core/src/server/http-twp';
@@ -8,6 +9,66 @@ import { nativeFixture } from '#native-fixture.test';
 import { openSsrSession } from '#native-session';
 import { ServerTreeSource } from '#server-tree-source';
 import { createLaneTreeSource } from '@treenx/react/tree/lane-source';
+import { SESSION_COOKIE } from '@treenx/core/security';
+
+it('opens an authenticated SSR request with a cookie and no Origin', async (t) => {
+  const { instance, admin, key } = await nativeFixture(t);
+  await admin.commit({
+    opId: key(),
+    changes: [{ op: 'put', node: { $path: '/secret', $type: 't.dir', title: 'cookie-secret' } }],
+  });
+  const api = createTwpHttpServer({ instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+  t.after(() => api.close());
+  api.server.listen(0, '127.0.0.1');
+  await once(api.server, 'listening');
+  const address = api.server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  assert.ok(instance.setupCredential);
+  const socket = new Socket();
+  t.after(() => socket.destroy());
+  const request = new IncomingMessage(socket);
+  request.headers.cookie = `${SESSION_COOKIE}=${instance.setupCredential.token}`;
+  const session = await openSsrSession(
+    `http://127.0.0.1:${address.port}`,
+    request,
+    new ServerResponse(request),
+  );
+  try {
+    const result = await session.reader.read({ node: '/secret' });
+    assert.equal(result.copies.length, 1);
+    assert.ok(!('error' in result.copies[0]));
+    assert.equal(result.copies[0].node.title, 'cookie-secret');
+    assert.equal(session.private, true);
+  } finally {
+    session.close();
+  }
+});
+
+it('preserves refusal of conflicting, empty and duplicate SSR credentials', async (t) => {
+  const { instance } = await nativeFixture(t);
+  const api = createTwpHttpServer({ instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+  t.after(() => api.close());
+  api.server.listen(0, '127.0.0.1');
+  await once(api.server, 'listening');
+  const address = api.server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  assert.ok(instance.setupCredential);
+  const cookie = `${SESSION_COOKIE}=${instance.setupCredential.token}`;
+  for (const headers of [
+    { cookie, authorization: 'Bearer other-token' },
+    { cookie: `${cookie}; ${cookie}` },
+    { cookie: `${SESSION_COOKIE}=` },
+  ]) {
+    const socket = new Socket();
+    t.after(() => socket.destroy());
+    const request = new IncomingMessage(socket);
+    request.headers = headers;
+    await assert.rejects(
+      () => openSsrSession(`http://127.0.0.1:${address.port}`, request, new ServerResponse(request)),
+      (error) => error instanceof KernelError && error.code === 'UNAUTHENTICATED',
+    );
+  }
+});
 
 it('binds real SSR HTTP transport to the incoming credential and closes the request owner', async (t) => {
   const { instance, admin, key } = await nativeFixture(t);
