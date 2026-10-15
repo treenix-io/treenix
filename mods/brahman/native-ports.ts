@@ -7,6 +7,7 @@ export interface BrahmanMedia {
 }
 
 export interface BrahmanUpdate {
+  readonly original?: Record<string, unknown>;
   readonly text?: string;
   readonly messageId?: number;
   readonly photo?: string;
@@ -100,6 +101,7 @@ export const brahmanRunSchema: JsonSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        original: { type: 'object' },
         text: { type: 'string' },
         messageId: { type: 'integer' },
         photo: { type: 'string' },

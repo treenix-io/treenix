@@ -9,6 +9,7 @@ export async function* ingestNativeAudio(
   body: Uint8Array,
   mime: string,
   path: string,
+  components: Record<string, unknown> = {},
 ) {
   await context.requireReadWrite(path);
   const io = context.io?.whisper;
@@ -25,6 +26,7 @@ export async function* ingestNativeAudio(
   };
 
   context.change.put({
+    ...components,
     $path: path,
     $type: 'whisper.transcription',
     '#audio': { $type: 'whisper.audio', ...audio },

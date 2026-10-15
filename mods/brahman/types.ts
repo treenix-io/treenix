@@ -85,6 +85,8 @@ export const ACTION_TYPES = [
 
 /** Telegram bot instance — token, proxy, language, maintenance */
 export class BotConfig {
+  /** Route non-text messages to the default page for personal inbox capture. */
+  declare captureAllMessages?: boolean;
   /** @title Token @description Telegram bot token */
   token = '';
   /** @title Proxy @description SOCKS proxy URL */
@@ -371,6 +373,8 @@ const declaredBrahmanSession = declareClientType('brahman.session', BrahmanSessi
 
 /** Incoming Telegram message persisted as a node (id = tg-<chatId>-<messageId> for idempotency) */
 export class BrahmanMessage {
+  /** Original Telegram payload, including forward attribution and media file identifiers. */
+  declare original?: Record<string, unknown>;
   tid = 0;
   chatId = 0;
   messageId = 0;

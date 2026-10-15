@@ -4,6 +4,7 @@
   "type": "object",
   "title": "Telegram bot instance — token, proxy, language, maintenance",
   "properties": {
+    "captureAllMessages": { "type": "boolean", "title": "Capture all message types" },
     "token": {
       "type": "string",
       "title": "Token",
@@ -46,15 +47,7 @@
       "default": true
     }
   },
-  "required": [
-    "token",
-    "proxy",
-    "alias",
-    "name",
-    "langs",
-    "maintenance",
-    "running"
-  ],
+  "required": ["token", "proxy", "alias", "name", "langs", "maintenance", "running"],
   "methods": {
     "start": {
       "arguments": []

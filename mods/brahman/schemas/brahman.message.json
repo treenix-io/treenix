@@ -4,6 +4,7 @@
   "type": "object",
   "title": "Incoming Telegram message persisted as a node (id = tg-<chatId>-<messageId> for idempotency)",
   "properties": {
+    "original": { "type": "object" },
     "tid": {
       "type": "number",
       "default": 0
@@ -31,14 +32,7 @@
       "default": 0
     }
   },
-  "required": [
-    "tid",
-    "chatId",
-    "messageId",
-    "from",
-    "text",
-    "createdAt"
-  ],
+  "required": ["tid", "chatId", "messageId", "from", "text", "createdAt"],
   "methods": {
     "apply-all": {
       "arguments": []
@@ -60,9 +54,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "entryId"
-          ]
+          "required": ["entryId"]
         }
       ]
     },
@@ -82,9 +74,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "entryId"
-          ]
+          "required": ["entryId"]
         }
       ]
     }

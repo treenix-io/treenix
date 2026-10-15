@@ -96,7 +96,7 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
         await context.reply(config.maintenance);
         return;
       }
-      const textInput = context.message?.text;
+      const textInput = context.message?.text ?? context.message?.caption;
       const messageId = context.msg?.message_id;
       const photo = context.message?.photo?.at(-1)?.file_id;
       const callbackData = context.callbackQuery?.data;
@@ -111,6 +111,7 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
         chatId: context.chat.id,
         lang: context.from.language_code ?? config.langs.split(',')[0].trim(),
         update: {
+          ...(context.message === undefined ? {} : { original: { ...context.message } }),
           ...(textInput === undefined ? {} : { text: textInput }),
           ...(messageId === undefined ? {} : { messageId }),
           ...(photo === undefined ? {} : { photo }),
@@ -171,7 +172,8 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
         if (
           text === undefined &&
           current.update.voice === undefined &&
-          current.update.audio === undefined
+          current.update.audio === undefined &&
+          (config.captureAllMessages !== true || current.update.original === undefined)
         )
           return;
         if (text !== undefined) {

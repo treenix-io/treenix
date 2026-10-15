@@ -83,6 +83,12 @@ export function runArguments(value: unknown): BrahmanRunArgs {
   )
     throw new KernelError('INVALID', 'Serialized Brahman update is required');
   const update = value.update;
+  const original = 'original' in update ? update.original : undefined;
+  if (
+    original !== undefined &&
+    (original === null || typeof original !== 'object' || Array.isArray(original))
+  )
+    throw new KernelError('INVALID', 'Invalid original Telegram message');
   const text = 'text' in update ? update.text : undefined;
   const photo = 'photo' in update ? update.photo : undefined;
   const callbackData = 'callbackData' in update ? update.callbackData : undefined;
@@ -109,6 +115,7 @@ export function runArguments(value: unknown): BrahmanRunArgs {
     chatId: value.chatId,
     lang: value.lang,
     update: {
+      ...(original === undefined ? {} : { original: { ...original } }),
       ...(text === undefined ? {} : { text }),
       ...(photo === undefined ? {} : { photo }),
       ...(callbackData === undefined ? {} : { callbackData }),
