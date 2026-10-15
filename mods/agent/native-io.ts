@@ -13,6 +13,8 @@ export interface AgentRequest {
   readonly model: string;
   readonly systemPrompt: string;
   readonly prompt: string;
+  readonly outputSchema?: Record<string, unknown>;
+  readonly tools?: 'none';
   readonly sessionId?: string;
   readonly forkSession?: boolean;
 }
