@@ -6,6 +6,7 @@ import type { TwpHttpRoutes } from '@treenx/core/server/http-routes';
 import type { Node, ServiceHandler, WriteAction } from '@treenx/core/kernel/types';
 import type { WhisperConfig } from './types';
 import { ingestNativeAudio } from './native-ingest';
+import { audioForm, readAudioUpload, type AudioUploads } from './native-upload';
 
 declare module '@treenx/core/kernel/manifest' {
   interface NativeModuleHost {
@@ -21,48 +22,47 @@ export function whisperConfig(node: Node): WhisperConfig {
 }
 
 /** Route all uploads through the selected caller's native streaming action. */
-export const ingestAction: WriteAction = {
-  kind: 'write',
-  io: true,
-  args: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['channel', 'audio', 'mime'],
-    properties: {
-      channel: { type: 'string', minLength: 1 },
-      audio: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9+/]*={0,2}$' },
-      mime: { type: 'string', minLength: 1 },
+export function ingestAction(uploads: AudioUploads): WriteAction {
+  return {
+    kind: 'write',
+    io: true,
+    args: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['channel', 'upload'],
+      properties: {
+        channel: { type: 'string', minLength: 1 },
+        upload: { type: 'string', minLength: 1 },
+      },
     },
-  },
-  async *handler(context, input) {
-    if (
-      typeof input !== 'object' ||
-      input === null ||
-      !('channel' in input) ||
-      typeof input.channel !== 'string' ||
-      !('audio' in input) ||
-      typeof input.audio !== 'string' ||
-      !('mime' in input) ||
-      typeof input.mime !== 'string'
-    )
-      throw new KernelError('INVALID', 'Invalid audio upload');
-    const settings = whisperConfig(context.node),
-      target = settings.channels[input.channel];
-    if (target === undefined)
-      throw new KernelError('NOT_FOUND', 'Whisper channel is not configured');
-    const body = Buffer.from(input.audio, 'base64');
-    return yield* ingestNativeAudio(
-      context,
-      settings,
-      body,
-      input.mime,
-      `${target}/${Date.now()}-${randomUUID()}`,
-    );
-  },
-};
+    async *handler(context, input) {
+      if (
+        typeof input !== 'object' ||
+        input === null ||
+        !('channel' in input) ||
+        typeof input.channel !== 'string' ||
+        !('upload' in input) ||
+        typeof input.upload !== 'string'
+      )
+        throw new KernelError('INVALID', 'Invalid audio upload');
+      const settings = whisperConfig(context.node),
+        target = settings.channels[input.channel];
+      if (target === undefined)
+        throw new KernelError('NOT_FOUND', 'Whisper channel is not configured');
+      const { body, mime, language } = uploads.get(input.upload, context.caller.principal);
+      return yield* ingestNativeAudio(
+        context,
+        language === undefined ? settings : { ...settings, language },
+        body,
+        mime,
+        `${target}/${Date.now()}-${randomUUID()}`,
+      );
+    },
+  };
+}
 
 /** Own the upload registration until its actual node service is retired. */
-export function whisperService(host: NativeModuleHost): ServiceHandler {
+export function whisperService(host: NativeModuleHost, uploads: AudioUploads): ServiceHandler {
   return async (node, session) => {
     const settings = whisperConfig(node);
     if (host.httpRoutes === undefined)
@@ -70,56 +70,65 @@ export function whisperService(host: NativeModuleHost): ServiceHandler {
     const dispose = host.httpRoutes.register(
       settings.url === '' ? node.$path : settings.url,
       async (request, response, caller) => {
+        await caller.read({ node: node.$path });
+        if (request.method === 'GET') {
+          response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          response.end(audioForm());
+          return;
+        }
         if (request.method !== 'POST')
           throw new KernelError('INVALID', 'Audio upload requires POST');
-        const channel = new URL(request.url ?? '/', 'http://localhost').searchParams.get('id');
-        if (channel === null) throw new KernelError('INVALID', 'Audio upload requires a channel');
-        const mime = request.headers['content-type'];
-        if (mime === undefined)
-          throw new KernelError('INVALID', 'Audio upload requires a MIME type');
-        const chunks: Buffer[] = [];
-        let size = 0;
-        for await (const chunk of request) {
-          const data: unknown = chunk;
-          if (!Buffer.isBuffer(data))
-            throw new KernelError('INVALID', 'Audio upload requires binary data');
-          size += data.length;
-          if (size > 25 * 1024 * 1024)
-            throw new KernelError('BUDGET', 'Audio upload exceeds the body limit');
-          chunks.push(data);
+        const channel =
+          new URL(request.url ?? '/', 'http://localhost').searchParams.get('id') ?? 'default';
+        if (settings.channels[channel] === undefined)
+          throw new KernelError('NOT_FOUND', 'Unknown audio channel');
+        const upload = uploads.add({
+          ...(await readAudioUpload(request)),
+          principal: caller.actor.principal,
+        });
+        try {
+          const lane = caller.lane[Symbol.asyncIterator](),
+            welcome = await lane.next();
+          if (welcome.done || welcome.value.t !== 'welcome')
+            throw new KernelError('UNAVAILABLE', 'Upload session did not open');
+          const intake = welcome.value.intake;
+          const delivery = (async () => {
+            for await (const frame of { [Symbol.asyncIterator]: () => lane }) {
+              if (frame.t === 'end') throw frame.error;
+            }
+          })();
+          const action = (async () => {
+            const pending = caller.act({
+              path: node.$path,
+              action: 'ingest',
+              args: { channel, upload },
+              opId: { epoch: intake, time: Date.now(), nonce: randomUUID() },
+            });
+            for await (const chunk of pending.chunks) {
+              // The first accepted piece already contains the pending node; the request retains its action lifetime.
+              void chunk;
+            }
+            const outcome = await pending.outcome;
+            return outcome.value;
+          })();
+          const result = await Promise.race([
+            action,
+            delivery.then(() => {
+              throw new KernelError('CANCELLED', 'Upload session ended');
+            }),
+          ]);
+          if (request.headers.accept?.includes('text/html')) {
+            response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            response.end(
+              '<!doctype html><html lang="en"><meta charset="utf-8"><title>Audio saved — Treenix</title><main><h1>Audio saved and transcribed</h1><p>The organizer will process it in your inbox.</p><p><a href="/t/inbox">Open inbox</a> · <a href="">Upload another recording</a></p></main></html>',
+            );
+          } else {
+            response.writeHead(200, { 'Content-Type': 'application/json' });
+            response.end(JSON.stringify(result));
+          }
+        } finally {
+          uploads.remove(upload);
         }
-        const lane = caller.lane[Symbol.asyncIterator](),
-          welcome = await lane.next();
-        if (welcome.done || welcome.value.t !== 'welcome')
-          throw new KernelError('UNAVAILABLE', 'Upload session did not open');
-        const intake = welcome.value.intake;
-        const delivery = (async () => {
-          for await (const frame of { [Symbol.asyncIterator]: () => lane }) {
-            if (frame.t === 'end') throw frame.error;
-          }
-        })();
-        const action = (async () => {
-          const pending = caller.act({
-            path: node.$path,
-            action: 'ingest',
-            args: { channel, mime, audio: Buffer.concat(chunks).toString('base64') },
-            opId: { epoch: intake, time: Date.now(), nonce: randomUUID() },
-          });
-          for await (const chunk of pending.chunks) {
-            // The first accepted piece already contains the pending node; the request retains its action lifetime.
-            void chunk;
-          }
-          const outcome = await pending.outcome;
-          return outcome.value;
-        })();
-        const result = await Promise.race([
-          action,
-          delivery.then(() => {
-            throw new KernelError('CANCELLED', 'Upload session ended');
-          }),
-        ]);
-        response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify(result));
       },
     );
     const done = (async () => {

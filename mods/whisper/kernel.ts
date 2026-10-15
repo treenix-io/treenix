@@ -2,6 +2,7 @@ import { A, R, W, type ModuleManifest, type TypeDef } from '@treenx/core/kernel/
 import type { NativeModuleDeployment, NativeModuleHost } from '@treenx/core/kernel/manifest';
 import { nativeSeed } from '#prefab/seed';
 import { ingestAction, whisperService } from './native-http';
+import { audioUploads } from './native-upload';
 import config from './schemas/whisper.config.json' with { type: 'json' };
 import audio from './schemas/whisper.audio.json' with { type: 'json' };
 import text from './schemas/whisper.text.json' with { type: 'json' };
@@ -15,6 +16,7 @@ const { methods, ...transcriptionSchema } = transcription;
 
 /** Construct security handlers under the current deployment's HTTP route owner. */
 export default function createNativeWhisper(host: NativeModuleHost = {}): NativeModuleDeployment {
+  const uploads = audioUploads();
   const types: TypeDef[] = [config, audio, text, meta, checklist, channel, transcriptionSchema].map(
     (schema) => ({
       name: schema.$id,
@@ -31,13 +33,15 @@ export default function createNativeWhisper(host: NativeModuleHost = {}): Native
     security: 'user-capability',
     version: 0,
     schema: { type: 'object', properties: {} },
-    actions: { ingest: ingestAction },
+    actions: { ingest: ingestAction(uploads) },
   });
 
   const manifest: ModuleManifest = {
     id: owner,
     types,
-    security: [{ type: 'whisper.service', context: 'service', handler: whisperService(host) }],
+    security: [
+      { type: 'whisper.service', context: 'service', handler: whisperService(host, uploads) },
+    ],
     open: [],
   };
 
