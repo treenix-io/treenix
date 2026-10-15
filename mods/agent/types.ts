@@ -107,6 +107,7 @@ export class AiAgent {
   status: AgentStatus = 'offline';
   // trustLevel removed (core-p95): it was metadata the guardian never read —
   // decorative security. Per-agent strictness lives in the AiPolicy cascade.
+  provider?: 'claude' | 'chatgpt';
   model = 'claude-opus-4-6';
   /** @format textarea */
   systemPrompt = '';

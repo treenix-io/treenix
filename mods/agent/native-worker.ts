@@ -139,6 +139,7 @@ async function* invokeWorker(this: WorkerConfig, ctx: WriteActionContext, args: 
     {
       key: copy.node.$id,
       model: agent.model,
+      provider: agent.provider,
       systemPrompt: `${agent.systemPrompt}\n${instructions}`,
       prompt: request.prompt,
       ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),

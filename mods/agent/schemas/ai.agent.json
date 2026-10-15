@@ -12,14 +12,12 @@
     },
     "status": {
       "type": "string",
-      "enum": [
-        "idle",
-        "working",
-        "blocked",
-        "error",
-        "offline"
-      ],
+      "enum": ["idle", "working", "blocked", "error", "offline"],
       "default": "offline"
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["claude", "chatgpt"]
     },
     "model": {
       "type": "string",
@@ -81,9 +79,7 @@
               "title": "Path to board.task"
             }
           },
-          "required": [
-            "task"
-          ]
+          "required": ["task"]
         }
       ]
     },

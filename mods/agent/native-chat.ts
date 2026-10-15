@@ -60,6 +60,7 @@ export async function* sendChat(this: AiChat, ctx: WriteActionContext, args: unk
   const request = {
     key: ctx.node.$id,
     model: agent.model,
+    provider: agent.provider,
     systemPrompt: agent.systemPrompt,
     prompt: prompt(agent.systemPrompt, messages),
     ...(this.sessionId.length === 0 ? {} : { sessionId: this.sessionId }),
@@ -70,16 +71,23 @@ export async function* sendChat(this: AiChat, ctx: WriteActionContext, args: unk
   yield { type: 'chunk', text: '' };
 
   let result: AgentResult | undefined;
-  for await (const event of provider.invoke(request, {
-    read: ctx.read,
-    act: ctx.act,
-    change: ctx.change,
-  })) {
-    if (event.type === 'chunk') yield event;
-    else result = event.result;
+  try {
+    for await (const event of provider.invoke(request, {
+      read: ctx.read,
+      act: ctx.act,
+      change: ctx.change,
+    })) {
+      if (event.type === 'chunk') yield event;
+      else result = event.result;
+    }
+    if (result === undefined)
+      throw new KernelError('UNAVAILABLE', 'Agent provider ended without a result');
+  } catch (error) {
+    console.error('[agent] Chat inference failed:', error);
+    this.streaming = false;
+    yield { type: 'chunk', text: '' };
+    throw error;
   }
-  if (result === undefined)
-    throw new KernelError('UNAVAILABLE', 'Agent provider ended without a result');
 
   const accepted = thread(ctx.node).messages;
   patchAgentComponent(ctx, ctx.node, 'ai.thread', {

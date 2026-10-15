@@ -9,6 +9,7 @@ import type {
 
 export interface AgentRequest {
   readonly key: NodeId;
+  readonly provider?: 'claude' | 'chatgpt';
   readonly model: string;
   readonly systemPrompt: string;
   readonly prompt: string;
