@@ -10,7 +10,7 @@ import {
   buildClearSessionCookie,
   buildSessionCookie,
   parseSessionCookie,
-  SESSION_COOKIE,
+  sessionCookies,
 } from '#security/cookies';
 import { isRecord } from '#util/is-record';
 import { assertSafePath } from '#core/path';
@@ -29,10 +29,7 @@ export interface TwpHttpOptions {
 function credentials(request: IncomingMessage): Credential | undefined {
   const authorization = request.headers.authorization,
     cookie = request.headers.cookie;
-  const cookies =
-    cookie
-      ?.split(';')
-      .filter((part) => part.slice(0, part.indexOf('=')).trim() === SESSION_COOKIE) ?? [];
+  const cookies = sessionCookies(cookie);
   if (cookies.length > 1) throw new KernelError('UNAUTHENTICATED', 'Conflicting session cookies');
   const token = parseSessionCookie(cookie);
   if (cookies.length === 1 && token === null)

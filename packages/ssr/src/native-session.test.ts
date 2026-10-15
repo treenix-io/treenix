@@ -11,6 +11,32 @@ import { ServerTreeSource } from '#server-tree-source';
 import { createLaneTreeSource } from '@treenx/react/tree/lane-source';
 import { SESSION_COOKIE } from '@treenx/core/security';
 
+it('opens an anonymous SSR session when the browser sends only unrelated cookies', async (t) => {
+  const { instance } = await nativeFixture(t);
+  const api = createTwpHttpServer({ instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+  t.after(() => api.close());
+  api.server.listen(0, '127.0.0.1');
+  await once(api.server, 'listening');
+  const address = api.server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  const socket = new Socket();
+  t.after(() => socket.destroy());
+  const request = new IncomingMessage(socket);
+  request.headers.cookie = `theme=dark; other_session=example; ${SESSION_COOKIE}_other=other`;
+  const session = await openSsrSession(
+    `http://127.0.0.1:${address.port}`,
+    request,
+    new ServerResponse(request),
+  );
+  try {
+    const welcome = await session.reader.ready;
+    assert.ok(welcome.principal.startsWith('anon:'));
+    assert.equal(session.private, false);
+  } finally {
+    session.close();
+  }
+});
+
 it('opens an authenticated SSR request with a cookie and no Origin', async (t) => {
   const { instance, admin, key } = await nativeFixture(t);
   await admin.commit({
@@ -27,7 +53,7 @@ it('opens an authenticated SSR request with a cookie and no Origin', async (t) =
   const socket = new Socket();
   t.after(() => socket.destroy());
   const request = new IncomingMessage(socket);
-  request.headers.cookie = `${SESSION_COOKIE}=${instance.setupCredential.token}`;
+  request.headers.cookie = `theme=dark; ${SESSION_COOKIE}=${instance.setupCredential.token}; other_session=example`;
   const session = await openSsrSession(
     `http://127.0.0.1:${address.port}`,
     request,

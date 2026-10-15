@@ -21,6 +21,15 @@ export function buildClearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
 }
 
+/** Retain all session cookies so credential admission can reject duplicates and empty values. */
+export function sessionCookies(cookieHeader: string | undefined): string[] {
+  if (cookieHeader === undefined) return [];
+  return cookieHeader.split(';').filter((part) => {
+    const separator = part.indexOf('=');
+    return separator >= 0 && part.slice(0, separator).trim() === SESSION_COOKIE;
+  });
+}
+
 /** Parse `${SESSION_COOKIE}=<token>` from a Cookie header. Returns null if absent. */
 export function parseSessionCookie(cookieHeader: string | undefined | null): string | null {
   if (!cookieHeader) return null;
