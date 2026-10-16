@@ -20,10 +20,12 @@ export class NativeConversation {
     );
   }
 
-  /** Execute one exact native action and preserve its pending outcome. */
+  /** Consume committed progress so streaming actions can reach their final outcome. */
   async act(path: string, action: string, args: unknown, component?: string): Promise<unknown> {
-    return (await this.session.act({ path, component, action, args, opId: this.key() }).outcome)
-      .value;
+    const pending = this.session.act({ path, component, action, args, opId: this.key() });
+    for await (const _piece of pending.chunks) {
+    }
+    return (await pending.outcome).value;
   }
 
   /** Enumerate complete children; a partial action palette cannot execute silently. */
