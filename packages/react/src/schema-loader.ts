@@ -6,6 +6,41 @@ import { KernelError } from '@treenx/core/errors';
 import { usePath, useTreeEffects } from '#hooks';
 import type { JsonSchema, Node } from '@treenx/core/kernel/types';
 import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
+import type { TreeEffects } from '#tree/effects';
+
+interface DescriptionQueue {
+  readonly requests: Map<string, Promise<NativeTypeDescription>>;
+  ready: Promise<void>;
+}
+
+const descriptionQueues = new WeakMap<TreeEffects, DescriptionQueue>();
+
+/** Share concurrent descriptions within one source and leave lane capacity for edits and actions. */
+function describeType(
+  effects: TreeEffects,
+  type: string,
+  generation: string | undefined,
+): Promise<NativeTypeDescription> {
+  const queue = descriptionQueues.get(effects) ?? {
+    requests: new Map<string, Promise<NativeTypeDescription>>(),
+    ready: Promise.resolve(),
+  };
+  descriptionQueues.set(effects, queue);
+  const key = JSON.stringify([type, generation]);
+  const shared = queue.requests.get(key);
+  if (shared !== undefined) return shared;
+
+  const result = queue.ready.then(() =>
+    effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type'),
+  );
+  queue.requests.set(key, result);
+  const release = () => {
+    queue.requests.delete(key);
+  };
+  // Only scheduling advances after refusal; every caller still receives the original rejection.
+  queue.ready = result.then(release, release);
+  return result;
+}
 
 // ── Schema convenience ────────────────────────────────────────────────────────
 
@@ -74,7 +109,7 @@ export function useNativeTypeDescription(
     let active = true;
     const kernel = effects.kernel;
     if (kernel === undefined) throw new Error('Native schema description requires a native source');
-    effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type').then(
+    describeType(effects, type, generation).then(
       (result) => {
         if (active) setLoaded({ effects, type, generation, value: result });
       },

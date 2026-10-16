@@ -58,6 +58,9 @@ import { createLaneTreeSource } from '#tree/lane-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import type { PathSnapshot } from '#tree/tree-source';
 import { TooltipProvider } from '#components/ui/tooltip';
+import { SchemaReader } from '#schema-loader';
+import { createLaneTreeClient } from '#tree/lane-tree-client';
+import { ErrorBoundary } from '#app/ErrorBoundary';
 
 publishClientExports({ clientModules });
 
@@ -260,6 +263,71 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', () => {
+  it(
+    'loads concurrent component schemas without exhausting the admitted lane',
+    { timeout: 10_000 },
+    async (t) => {
+      const f = await fixture('concurrent-component-schemas', true);
+      t.after(f.close);
+      const types = Array.from({ length: 12 }, (_, index) => ({
+        ...f.module.types[0],
+        name: `editor.section-${index}`,
+      }));
+      await f.admin.commit({
+        opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'sections' },
+        changes: types.map(type => ({
+          op: 'put' as const,
+          node: {
+            $path: `/sys/types/${type.name}`,
+            $type: 't.type',
+            name: type.name,
+            module: type.module,
+            security: type.security,
+          },
+        })),
+      });
+      f.instance.registry.publish({ ...f.module, types: [...f.module.types, ...types] });
+      const owner = createLaneTreeClient(f.client);
+      const source = createLaneTreeSource(owner);
+      t.after(() => {
+        source.close();
+        owner.close();
+      });
+      const ui = render(
+        createElement(ErrorBoundary, {
+          children: types.flatMap(type =>
+            [0, 1].map(copy =>
+              createElement(SchemaReader, {
+                key: `${type.name}:${copy}`,
+                type: type.name,
+                children: schema =>
+                  createElement('span', null, `${type.name}:${copy}:${schema?.type}`),
+              }),
+            ),
+          ),
+        }),
+        {
+          wrapper: ({ children }) =>
+            createElement(TreeSourceProvider, { source, children }),
+        },
+      );
+
+      for (const type of types) {
+        for (const copy of [0, 1]) {
+          assert.ok(await ui.findByText(`${type.name}:${copy}:object`));
+        }
+      }
+      const descriptions = f.sent.filter(
+        request => request.t === 'act' && request.action === 'describe_type',
+      );
+      assert.equal(descriptions.length, types.length);
+      const next = await source.effects.execute('/document', 'inspect', {
+        after: 'schemas',
+      });
+      assert.deepEqual(next, { after: 'schemas' });
+    },
+  );
+
   it(
     'uses native schemas when mounted and loader-owned generated schemas for reader-only rendering',
     { timeout: 10_000 },
