@@ -167,7 +167,11 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
       throw new KernelError('REFUSED', 'Cookie requests need an allowed origin');
     if (route !== undefined) {
       route.signal.throwIfAborted();
-      const opened = await instance.sessionFactory.openCredential(credential, network);
+      const supplied = await route.credential?.(request);
+      if (supplied !== undefined && credential !== undefined && supplied.token !== credential.token)
+        throw new KernelError('UNAUTHENTICATED', 'Conflicting credentials');
+      route.signal.throwIfAborted();
+      const opened = await instance.sessionFactory.openCredential(supplied ?? credential, network);
       const closed = () => opened.session.close(new KernelError('CANCELLED', 'HTTP route ended'));
       const disconnected = () => {
         if (!response.writableEnded) closed();

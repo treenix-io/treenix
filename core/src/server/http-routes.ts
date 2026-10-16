@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { assertSafePath } from '#core/path';
 import { KernelError } from '#errors';
-import type { Session } from '#kernel/types';
+import type { Credential, Session } from '#kernel/types';
 
 /** A route owns consumption of its Session lane; the binding owns its lifetime. */
 export type TwpHttpHandler = (
@@ -10,8 +10,12 @@ export type TwpHttpHandler = (
   session: Session,
 ) => Promise<void>;
 
+/** Extracts an optional credential before the binding admits the request's session. */
+export type TwpHttpCredential = (request: IncomingMessage) => Promise<Credential | undefined>;
+
 export interface RegisteredRoute {
   readonly handler: TwpHttpHandler;
+  readonly credential?: TwpHttpCredential;
   readonly signal: AbortSignal;
   readonly controller: AbortController;
 }
@@ -24,7 +28,7 @@ export function createTwpHttpRoutes() {
 
   return {
     /** Returns a disposer for exactly this registration, including its in-flight requests. */
-    register(path: string, handler: TwpHttpHandler): () => void {
+    register(path: string, handler: TwpHttpHandler, credential?: TwpHttpCredential): () => void {
       if (closed) throw new KernelError('UNAVAILABLE', 'HTTP routes are closed');
       assertSafePath(path);
       if (
@@ -37,7 +41,7 @@ export function createTwpHttpRoutes() {
       if (routes.has(path)) throw new KernelError('CONFLICT', 'HTTP route is already registered');
 
       const controller = new AbortController();
-      const route = { handler, signal: controller.signal, controller };
+      const route = { handler, credential, signal: controller.signal, controller };
       routes.set(path, route);
 
       return () => {

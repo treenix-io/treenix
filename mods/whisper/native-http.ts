@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import type { NativeModuleHost } from '@treenx/core/kernel/manifest';
@@ -6,7 +7,7 @@ import type { TwpHttpRoutes } from '@treenx/core/server/http-routes';
 import type { Node, ServiceHandler, WriteAction } from '@treenx/core/kernel/types';
 import type { WhisperConfig } from './types';
 import { ingestNativeAudio } from './native-ingest';
-import { audioForm, readAudioUpload, type AudioUploads } from './native-upload';
+import { audioForm, readAudioUpload, type AudioUpload, type AudioUploads } from './native-upload';
 
 declare module '@treenx/core/kernel/manifest' {
   interface NativeModuleHost {
@@ -67,6 +68,8 @@ export function whisperService(host: NativeModuleHost, uploads: AudioUploads): S
     const settings = whisperConfig(node);
     if (host.httpRoutes === undefined)
       throw new KernelError('UNAVAILABLE', 'Whisper HTTP host is not bound');
+    // Multipart bodies are consumed once during credential extraction; only audio survives admission.
+    const forms = new WeakMap<IncomingMessage, Omit<AudioUpload, 'principal'>>();
     const dispose = host.httpRoutes.register(
       settings.url === '' ? node.$path : settings.url,
       async (request, response, caller) => {
@@ -82,10 +85,9 @@ export function whisperService(host: NativeModuleHost, uploads: AudioUploads): S
           new URL(request.url ?? '/', 'http://localhost').searchParams.get('id') ?? 'default';
         if (settings.channels[channel] === undefined)
           throw new KernelError('NOT_FOUND', 'Unknown audio channel');
-        const upload = uploads.add({
-          ...(await readAudioUpload(request)),
-          principal: caller.actor.principal,
-        });
+        const { body, mime, language } = forms.get(request) ?? (await readAudioUpload(request));
+        forms.delete(request);
+        const upload = uploads.add({ body, mime, language, principal: caller.actor.principal });
         try {
           const lane = caller.lane[Symbol.asyncIterator](),
             welcome = await lane.next();
@@ -129,6 +131,16 @@ export function whisperService(host: NativeModuleHost, uploads: AudioUploads): S
         } finally {
           uploads.remove(upload);
         }
+      },
+      async (request) => {
+        if (
+          request.method !== 'POST' ||
+          !/^multipart\/form-data(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')
+        )
+          return undefined;
+        const { credential, ...upload } = await readAudioUpload(request);
+        forms.set(request, upload);
+        return credential;
       },
     );
     const done = (async () => {

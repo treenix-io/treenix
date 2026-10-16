@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { KernelError } from '@treenx/core/errors';
+import type { Credential } from '@treenx/core/kernel/types';
 import { extForMime } from './audio';
 
 export interface AudioUpload {
@@ -48,10 +49,17 @@ export async function readAudioUpload(request: IncomingMessage) {
     mime = contentType.split(';')[0].trim();
   let language =
     new URL(request.url ?? '/', 'http://localhost').searchParams.get('language') ?? undefined;
+  let credential: Credential | undefined;
   if (mime === 'multipart/form-data') {
     const form = await new Response(Buffer.concat(chunks), {
       headers: { 'content-type': contentType },
     }).formData();
+    const tokens = form.getAll('token');
+    if (tokens.length !== 0) {
+      if (tokens.length !== 1 || typeof tokens[0] !== 'string' || !/^\S+$/.test(tokens[0]))
+        throw new KernelError('UNAUTHENTICATED', 'Invalid form credential');
+      credential = { token: tokens[0] };
+    }
     const file = form.get('audio');
     if (!(file instanceof File)) throw new KernelError('INVALID', 'Select an audio file');
     body = new Uint8Array(await file.arrayBuffer());
@@ -67,7 +75,7 @@ export async function readAudioUpload(request: IncomingMessage) {
     throw new KernelError('INVALID', 'A supported, nonempty audio file is required');
   if (language !== undefined && !/^[a-z]{2,3}$/.test(language))
     throw new KernelError('INVALID', 'Audio language must be a language code');
-  return { body, mime, ...(language === undefined ? {} : { language }) };
+  return { body, mime, ...(language === undefined ? {} : { language }), credential };
 }
 
 export function audioForm(): string {
