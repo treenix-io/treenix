@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { describe, it, type TestContext } from 'node:test';
 import { openTwpHttp } from '#client/http-twp';
-import { createTwpClient } from '#client/twp';
+import { createTwpClient, type NodeSubscription } from '#client/twp';
 import { KernelError } from '#errors';
 import { createInstanceFoundation } from '#kernel/instance';
 import { scanBudget } from '#kernel/store/contract';
@@ -59,6 +59,57 @@ async function setup(t: TestContext) {
 }
 
 describe('native HTTP client', { timeout: 10_000 }, () => {
+  it(
+    'releases a page of subscriptions together and keeps the same lane usable',
+    async (t) => {
+      const f = await setup(t);
+      await f.client.ready;
+    const subscriptions: NodeSubscription[] = [];
+      for (let index = 0; index < 32; index++) {
+        const subscription = f.client.sub({ node: '/sys/limits' }, () => {});
+        subscriptions.push(subscription);
+        await subscription.ready;
+      }
+
+      assert.doesNotThrow(() => {
+        for (const subscription of subscriptions) subscription.close();
+      });
+      for (const subscription of subscriptions)
+        assert.equal(f.client.cache.list(subscription.id), undefined);
+      assert.equal((await f.client.read({ node: '/sys/limits' })).list.length, 1);
+
+      const next = Array.from({ length: 32 }, () =>
+        f.client.sub({ node: '/sys/limits' }, () => {}),
+      );
+      await Promise.all(next.map(subscription => subscription.ready));
+      for (const subscription of next) subscription.close();
+      assert.equal((await f.client.read({ node: '/sys/limits' })).list.length, 1);
+      assert.equal(f.client.failure(), undefined);
+    },
+  );
+
+  it(
+    'refuses an oversized UTF-8 input before sending it and preserves the admitted lane',
+    async (t) => {
+      const f = await setup(t);
+      const connection = await openTwpHttp({
+        url: f.url,
+        credential: f.credential,
+        limits: { requestBytes: 256, readNodes: 100 },
+      });
+      const client = createTwpClient(connection, { close: connection.close });
+      t.after(() => client.close());
+      await client.ready;
+
+      await assert.rejects(
+        client.read({ node: `/${'я'.repeat(128)}` }),
+        code('BUDGET'),
+      );
+      assert.equal((await client.read({ node: '/sys/limits' })).list.length, 1);
+      assert.equal(client.failure(), undefined);
+    },
+  );
+
   it('grows an underfilled child window while retaining a truncated page boundary', async (t) => {
     const f = await setup(t);
     await f.client.ready;

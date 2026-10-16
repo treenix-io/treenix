@@ -27,6 +27,11 @@ export interface TwpHttpClientOptions {
   readonly heartbeatMs?: number;
 }
 
+interface InputBatch {
+  readonly commands: string[];
+  bytes: number;
+}
+
 /** Bind the existing HTTP lane transport to a mount-owned federation resource. */
 export function createTwpHttpFederation(
   options: Omit<TwpHttpClientOptions, 'url' | 'credential' | 'cache'> = {},
@@ -149,21 +154,45 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
     headers.set('Authorization', `Bearer ${locator.credential.token}`);
   }
   headers.set('TWP-Lane', lane);
+  const inputBytes = options.limits?.requestBytes ?? DEFAULT_LIMITS.requestBytes;
+  const encoder = new TextEncoder();
+  let queued: InputBatch | undefined;
   let send = Promise.resolve(),
     outstanding = 0;
+
+  /** Pack bursts into ordered wire batches while bounding each body and the queued HTTP work. */
   function post(request: Request | readonly Request[]): void {
     signal.throwIfAborted();
+    const requests = 't' in request ? [request] : request;
+    const commands = requests.map(value => JSON.stringify(value));
+    const bytes = encoder.encode(commands.join(',')).byteLength + 2;
+    if (commands.length > 16 || bytes > inputBytes)
+      throw new KernelError('BUDGET', 'HTTP input batch exceeded its budget');
+
+    const separator =
+      queued !== undefined && queued.commands.length > 0 && commands.length > 0 ? 1 : 0;
+    if (
+      queued !== undefined &&
+      queued.commands.length + commands.length <= 16 &&
+      queued.bytes + bytes - 2 + separator <= inputBytes
+    ) {
+      queued.commands.push(...commands);
+      queued.bytes += bytes - 2 + separator;
+      return;
+    }
     if (outstanding >= 16) throw new KernelError('BUDGET', 'HTTP input buffer exceeded');
-    const body = JSON.stringify(request);
+    const batch: InputBatch = { commands, bytes };
+    queued = batch;
     outstanding++;
     send = send
       .then(async () => {
+        if (queued === batch) queued = undefined;
         const response = await fetch(`${url}/twp`, {
           method: 'POST',
           headers,
           credentials,
           signal,
-          body,
+          body: `[${batch.commands.join(',')}]`,
         });
         if (!response.ok) await refusal(response);
       })
