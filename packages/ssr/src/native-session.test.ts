@@ -7,9 +7,50 @@ import { KernelError } from '@treenx/core/errors';
 import { createTwpHttpServer } from '../../../core/src/server/http-twp';
 import { nativeFixture } from '#native-fixture.test';
 import { openSsrSession } from '#native-session';
+import { recoverSsrAuthentication } from '#auth-failure';
 import { ServerTreeSource } from '#server-tree-source';
 import { createLaneTreeSource } from '@treenx/react/tree/lane-source';
-import { SESSION_COOKIE } from '@treenx/core/security';
+import { SESSION_COOKIE, buildClearSessionCookie } from '@treenx/core/security';
+
+it('expired SSR cookies load only a fresh login shell and are cleared', async (t) => {
+  const { instance } = await nativeFixture(t);
+  const api = createTwpHttpServer({ instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+  t.after(() => api.close());
+  api.server.listen(0, '127.0.0.1');
+  await once(api.server, 'listening');
+  const address = api.server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  const front = createServer(async (request, response) => {
+    try {
+      const session = await openSsrSession(`http://127.0.0.1:${address.port}`, request, response);
+      session.close();
+      response.end('Unexpected authenticated rendering');
+    } catch (error) {
+      if (!recoverSsrAuthentication(error, response)) throw error;
+      response.end('<div id="root"></div>');
+    }
+  });
+  t.after(() => new Promise<void>((resolve) => front.close(() => resolve())));
+  front.listen(0, '127.0.0.1');
+  await once(front, 'listening');
+  const host = front.address();
+  assert.ok(host !== null && typeof host === 'object');
+  const result = await fetch(`http://127.0.0.1:${host.port}/t/plan`, {
+    headers: { cookie: `${SESSION_COOKIE}=obsolete-credential` },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get('set-cookie'), buildClearSessionCookie());
+  assert.equal(result.headers.get('cache-control'), 'private, no-store');
+  assert.equal(await result.text(), '<div id="root"></div>');
+  const socket = new Socket();
+  t.after(() => socket.destroy());
+  const response = new ServerResponse(new IncomingMessage(socket));
+  assert.equal(
+    recoverSsrAuthentication(new KernelError('UNAVAILABLE', 'Backend offline'), response),
+    false,
+  );
+  assert.equal(response.headersSent, false);
+});
 
 it('opens an anonymous SSR session when the browser sends only unrelated cookies', async (t) => {
   const { instance } = await nativeFixture(t);
@@ -90,7 +131,8 @@ it('preserves refusal of conflicting, empty and duplicate SSR credentials', asyn
     const request = new IncomingMessage(socket);
     request.headers = headers;
     await assert.rejects(
-      () => openSsrSession(`http://127.0.0.1:${address.port}`, request, new ServerResponse(request)),
+      () =>
+        openSsrSession(`http://127.0.0.1:${address.port}`, request, new ServerResponse(request)),
       (error) => error instanceof KernelError && error.code === 'UNAUTHENTICATED',
     );
   }

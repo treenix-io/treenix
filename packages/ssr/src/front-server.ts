@@ -23,6 +23,7 @@ import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { openSsrSession } from '#native-session';
+import { recoverSsrAuthentication } from '#auth-failure';
 import { RouteIndex, fetchRouteNodes } from './route-index.ts';
 import { ssrHandler, type RenderFn } from './handler.ts';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from './template.ts';
@@ -195,6 +196,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     } catch (err) {
+      if (recoverSsrAuthentication(err, res)) {
+        res.end(indexHtml);
+        return;
+      }
       console.error('[front] SSR failed', err);
       res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
       res.end('Rendering unavailable');

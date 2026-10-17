@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import { openSsrSession } from '#native-session';
+import { recoverSsrAuthentication } from '#auth-failure';
 import { RouteIndex, fetchRouteNodes } from '#route-index';
 import { ssrHandler, type RenderFn } from '#handler';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from '#template';
@@ -85,6 +86,11 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
           for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
           res.end(html);
         } catch (err) {
+          if (recoverSsrAuthentication(err, res)) {
+            const template = await readFile(resolve(vite.config.root, 'index.html'), 'utf-8');
+            res.end(await vite.transformIndexHtml(req.url ?? '/', template));
+            return;
+          }
           vite.ssrFixStacktrace(err as Error);
           next(err as Error);
         } finally {
