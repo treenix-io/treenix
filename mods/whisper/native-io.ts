@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { KernelError } from '@treenx/core/errors';
 import type { ActionIoBinding } from '@treenx/core/kernel/types';
-import { extForMime, getTranscriber, readWavAsFloat32 } from './audio';
+import { extForMime, readWavAsFloat32 } from './audio';
+import { WhisperRecognizer } from './native-recognizer';
 
 export interface WhisperSettings {
   readonly audioDir: string;
@@ -42,28 +43,12 @@ export type WhisperRecognition = (
   settings: WhisperSettings,
 ) => Promise<RecognizedAudio>;
 
-/** Use the shared cached model after audio has been converted to mono samples. */
-async function recognizeAudio(
-  samples: Float32Array,
-  settings: WhisperSettings,
-): Promise<RecognizedAudio> {
-  const transcriber = await getTranscriber(settings.model);
-  const output = await transcriber(samples, {
-    language: settings.language,
-    return_timestamps: true,
-  });
-  return {
-    content: output.text.trim(),
-    duration: output.chunks?.at(-1)?.timestamp[1] ?? 0,
-    segments: output.chunks?.length ?? 0,
-  };
-}
-
 /** Bind authored audio directory names to explicit host capabilities. */
 export function createWhisperIo(
   directories: Readonly<Record<string, string>>,
-  recognize: WhisperRecognition = recognizeAudio,
+  recognize?: WhisperRecognition,
 ): ActionIoBinding {
+  const recognizer = new WhisperRecognizer();
   const admittedDirectories = new Map(
     Object.entries(directories).map(([name, path]) => [name, resolve(path)]),
   );
@@ -111,9 +96,21 @@ export function createWhisperIo(
               ],
               { signal: scope.signal },
             );
-            const samples = await readWavAsFloat32(wavPath);
             scope.assertActive();
-            const output = await recognize(samples, settings);
+            const output =
+              recognize === undefined
+                ? await recognizer.recognize(
+                    {
+                      wavPath,
+                      settings: {
+                        audioDir: settings.audioDir,
+                        model: settings.model,
+                        language: settings.language,
+                      },
+                    },
+                    scope,
+                  )
+                : await recognize(await readWavAsFloat32(wavPath), settings);
             scope.assertActive();
             return output;
           } finally {
