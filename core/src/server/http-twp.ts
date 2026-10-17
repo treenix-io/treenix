@@ -108,10 +108,28 @@ export async function writeSse(
   frames: AsyncIterable<Frame>,
   signal: AbortSignal,
 ): Promise<void> {
-  for await (const frame of frames) {
-    signal.throwIfAborted();
-    if (!response.write(`data: ${encodeFrame(frame)}\n\n`))
-      await once(response, 'drain', { signal });
+  signal.throwIfAborted();
+  // Client POST heartbeats cannot keep this separate proxy response stream alive.
+  const heartbeat = setInterval(() => {
+    if (
+      !signal.aborted &&
+      !response.destroyed &&
+      !response.writableEnded &&
+      !response.writableNeedDrain
+    )
+      response.write(': keep-alive\n\n');
+  }, 15_000);
+  const stop = () => clearInterval(heartbeat);
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    for await (const frame of frames) {
+      signal.throwIfAborted();
+      if (!response.write(`data: ${encodeFrame(frame)}\n\n`))
+        await once(response, 'drain', { signal });
+    }
+  } finally {
+    stop();
+    signal.removeEventListener('abort', stop);
   }
 }
 

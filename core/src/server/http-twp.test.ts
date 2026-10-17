@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdir, mkdtemp } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -450,7 +450,9 @@ describe('real native HTTP binding', { timeout: 30_000 }, () => {
     assert.deepEqual(networkAddress('::ffff:127.0.0.1'), networkAddress('127.0.0.1'));
   });
   it('stops pulling native output until the real socket drains', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
     let pulled = 0;
+    let outgoing: ServerResponse | undefined;
     let finished!: () => void;
     const drained = new Promise<void>((resolve) => {
         finished = resolve;
@@ -464,6 +466,7 @@ describe('real native HTTP binding', { timeout: 30_000 }, () => {
       yield { t: 'done', req: 'after-drain' };
     }
     const server = createServer((_request, response) => {
+      outgoing = response;
       response.writeHead(200, { 'Content-Type': 'text/event-stream' });
       writeSse(response, frames(), controller.signal).then(
         () => response.end(),
@@ -489,6 +492,11 @@ describe('real native HTTP binding', { timeout: 30_000 }, () => {
     await once(socket, 'data');
     socket.pause();
     assert.equal(pulled, 1);
+    assert.ok(outgoing);
+    assert.equal(outgoing.writableNeedDrain, true);
+    const buffered = outgoing.writableLength;
+    t.mock.timers.tick(150_000);
+    assert.equal(outgoing.writableLength, buffered);
     socket.resume();
     await drained;
     assert.equal(pulled, 2);
