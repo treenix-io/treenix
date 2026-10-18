@@ -51,7 +51,7 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
     }
     if (config.token === '') throw new KernelError('INVALID', 'Bot token is not configured');
     const bot = options.bot === undefined ? new Bot(config.token) : options.bot(config.token);
-    const unregister = owner.register(node.$path, session.actor.principal, bot);
+    const unregister = owner.register(node.$path, session, bot);
     const queues = new Map<number, Promise<void>>();
     let runner: ReturnType<NonNullable<NativeBrahmanOptions['start']>> | undefined;
     let active = true;
@@ -146,6 +146,19 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
               current,
               split < 0 ? undefined : target.slice(split + 1),
             );
+          } else if (data.startsWith('cmd:')) {
+            const separator = data.indexOf(':', 4);
+            const command = separator < 0 ? data.slice(4) : data.slice(4, separator);
+            const page = await conversation.command(current, command);
+            if (page === undefined)
+              throw new KernelError('NOT_FOUND', 'Callback command has no page');
+            await context.answerCallbackQuery();
+            await conversation.page(
+              page,
+              current,
+              separator < 0 ? undefined : data.slice(separator + 1),
+            );
+            return;
           } else if (data.startsWith('lang:')) {
             const lang = data.slice(5);
             await conversation.act(`${node.$path}/users/${args.userId}`, 'setLanguage', { lang });

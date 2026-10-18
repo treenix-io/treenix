@@ -1,5 +1,10 @@
-import type { JsonSchema, WriteActionContext } from '@treenx/core/kernel/types';
-import type { buildReplyMarkup } from '#brahman/helpers';
+import type { BlobRef, JsonSchema, WriteActionContext } from '@treenx/core/kernel/types';
+import type {
+  ForceReply,
+  InlineKeyboardMarkup,
+  ReplyKeyboardMarkup,
+  ReplyKeyboardRemove,
+} from 'grammy/types';
 
 export interface BrahmanMedia {
   readonly fileId: string;
@@ -51,7 +56,11 @@ export interface TelegramMessageOptions {
   readonly parse_mode?: 'HTML';
   readonly disableLinks?: boolean;
   readonly replyToMessageId?: number;
-  readonly replyMarkup?: NonNullable<ReturnType<typeof buildReplyMarkup>>['reply_markup'];
+  readonly replyMarkup?:
+    | InlineKeyboardMarkup
+    | ReplyKeyboardMarkup
+    | ReplyKeyboardRemove
+    | ForceReply;
 }
 
 /** The external adapter owns bot credentials and request cancellation. */
@@ -73,6 +82,7 @@ export interface BrahmanTelegram {
   forward(botPath: string, chatId: number, fromChatId: number, messageId: number): Promise<number>;
   file(botPath: string, chatId: number, kind: string, fileId: string): Promise<number>;
   download(botPath: string, fileId: string): Promise<Uint8Array>;
+  storeFile(botPath: string, fileId: string, mime: string): Promise<BlobRef>;
 }
 
 declare module '@treenx/core/kernel/types' {

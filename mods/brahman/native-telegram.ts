@@ -2,18 +2,19 @@ import { AbortController as TelegramAbortController } from 'abort-controller';
 import { Bot } from 'grammy';
 import { getActionContext } from '@treenx/core/kernel';
 import { KernelError } from '@treenx/core/errors';
-import type { ActionIoBinding, Principal } from '@treenx/core/kernel/types';
+import type { ActionIoBinding, Principal, Session } from '@treenx/core/kernel/types';
 import type { BrahmanTelegram } from '#brahman/native-ports';
 
 interface RunningBot {
   readonly bot: Bot;
   readonly principal: Principal;
+  readonly session: Session;
 }
 
 /** Bind external Telegram calls to each actual running node service. */
 export function telegramOwner(): {
   readonly io: ActionIoBinding;
-  register(path: string, principal: Principal, bot: Bot): () => void;
+  register(path: string, session: Session, bot: Bot): () => void;
 } {
   const running = new Map<string, RunningBot>();
   const io: ActionIoBinding = (scope) => {
@@ -126,15 +127,28 @@ export function telegramOwner(): {
         scope.assertActive();
         return body;
       },
+      async storeFile(path, fileId, mime) {
+        await admitted(path);
+        const owner = running.get(path);
+        if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Bot service stopped');
+        const body = await brahman.download(path, fileId);
+        async function* parts() {
+          scope.assertActive();
+          yield body;
+        }
+        const stored = await owner.session.upload(parts(), mime);
+        scope.assertActive();
+        return stored;
+      },
     };
     return { brahman };
   };
 
   return {
     io,
-    register(path, principal, bot) {
+    register(path, session, bot) {
       if (running.has(path)) throw new KernelError('CONFLICT', 'Bot service is already running');
-      const owner = { bot, principal };
+      const owner = { bot, principal: session.actor.principal, session };
       running.set(path, owner);
       return () => {
         if (running.get(path) === owner) running.delete(path);

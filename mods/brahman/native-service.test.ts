@@ -23,6 +23,7 @@ import { component, nativeNode, type NativeSessionState } from '#brahman/native-
 /** Exercise real autostart, Telegram routing and persisted native action sequencing. */
 test('native bot resumes a question and executes owned child calls and scripts', async () => {
   const sent: string[] = [];
+  const acknowledged: string[] = [];
   let stopObserved = () => {};
   const stopped = new Promise<void>((resolve) => {
     stopObserved = resolve;
@@ -50,6 +51,15 @@ test('native bot resumes a question and executes owned child calls and scripts',
         },
         client: {
           async fetch(url: RequestInfo | URL, init?: RequestInit) {
+            if (String(url).endsWith('/answerCallbackQuery')) {
+              if (typeof init?.body !== 'string')
+                throw new Error('Callback request has no JSON body');
+              const payload: { callback_query_id: string } = JSON.parse(init.body);
+              acknowledged.push(payload.callback_query_id);
+              return new Response(JSON.stringify({ ok: true, result: true }), {
+                headers: { 'content-type': 'application/json' },
+              });
+            }
             if (!String(url).endsWith('/sendMessage'))
               throw new Error(`Unexpected Telegram endpoint: ${String(url)}`);
             if (typeof init?.body !== 'string')
@@ -305,6 +315,53 @@ test('native bot resumes a question and executes owned child calls and scripts',
     assert.equal(state.data.wait, undefined);
     assert.deepEqual(state.history, [page]);
     assert.deepEqual(sent, ['Welcome', 'Name?', 'Script accepted']);
+    const callbackPage = `${root}/pages/incoming`;
+    await admin.commit({
+      changes: [
+        {
+          op: 'put',
+          node: {
+            $path: callbackPage,
+            $type: 'brahman.page',
+            command: '/incoming',
+            positions: [`${callbackPage}/_actions/select`],
+          },
+        },
+        { op: 'put', node: { $path: `${callbackPage}/_actions`, $type: 't.dir' } },
+        {
+          op: 'put',
+          node: {
+            $path: `${callbackPage}/_actions/select`,
+            $type: 'brahman.action.setvalue',
+            ...new SetValueAction(),
+            value: 'data.param',
+            saveTo: 'selected',
+          },
+        },
+      ],
+    });
+    await bot.handleUpdate({
+      update_id: 20,
+      callback_query: {
+        id: 'receipt-1',
+        from: { id: 12, is_bot: false, first_name: 'User' },
+        chat_instance: 'chat',
+        data: 'cmd:incoming:note:1',
+        message: {
+          message_id: 5,
+          date: 0,
+          chat: { id: 12, type: 'private', first_name: 'User' },
+          text: 'Older receipt',
+        },
+      },
+    });
+    const selected = component<NativeSessionState>(
+      await nativeNode(session, `${root}/sessions/12`),
+      'brahman.session',
+    );
+    assert.equal(selected.data.selected, 'note:1');
+    assert.equal(selected.history.at(-1), callbackPage);
+    assert.deepEqual(acknowledged, ['receipt-1']);
     const history = await session.read({ history: `${root}/sessions/12` });
     assert.ok(history.history);
     assert.deepEqual(
